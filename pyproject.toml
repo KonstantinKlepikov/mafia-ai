@@ -1,0 +1,82 @@
+[tool.poetry]
+name = "mafia-ai"
+version = "0.0.0"
+description = "mafia-ai monorepo"
+authors = ["Konstantin Klepikov <oformleno@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+# package-mode = false
+
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.15"
+isort = "^8.0"
+PyYAML = "^6.0"
+annotated-types = "^0.7.0"
+python-dotenv = "^1.0.1"
+pydantic = "^2.12.5"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0"
+pytest-asyncio = "^1.0"
+pytest-cov = "^7.0"
+flake8 = "^7.0"
+flake8-broken-line = "^1.0"
+flake8-return = "^1.0"
+flake8-isort = "^7.0"
+flake8-quotes = "^3.0"
+flake8-bugbear = "^25.0.0"
+flake8-pyproject = "^1.0"
+pep8-naming = "^0.15"
+mypy = "^1.19"
+ruff = "^0.15"
+radon = "^6.0"
+pytest-bdd = '^8.0'
+
+# custom
+gevent = "^25.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.blue]
+line-length = 88
+preview = true
+
+
+[tool.isort]
+profile = "black"
+
+
+[tool.flake8]
+max-line-length = 88
+max-complexity = 10
+extend-immutable-calls = ["Depends"]
+
+
+[tool.ruff]
+line-length = 88
+
+
+[tool.ruff.format]
+quote-style = "single"
+
+
+[tool.mypy]
+check_untyped_defs = true
+ignore_missing_imports = true
+mypy_path = ["services", "shared", "tests"]
+plugins = ["pydantic.mypy"]
+
+
+[tool.pytest.ini_options]
+python_files = "test_*.py"
+testpaths = "tests"
+norecursedirs = ["venv*", ".venv"]
+disable_test_id_escaping_and_forfeit_all_rights_to_community_support = true
+addopts = "-v -x -s -p no:warnings -m main"
+asyncio_mode = "auto"
