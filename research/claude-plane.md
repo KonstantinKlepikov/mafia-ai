@@ -48,6 +48,9 @@ mafia-ai/
 - `VoteEvent` — `{voter_id, target_id, phase, round}`
 - `GameState` — `{round, phase, alive_agents, eliminated}`
 - `AgentState` — `{agent_id, role, persona_id, message_history}`
+- `AgentInfo` — `{agent_id, persona_name, role, status: ALIVE | ELIMINATED, container_id}` — сведения об агенте для оркестратора
+- `HostQuestion` — `{question_id, target_agent_id, question_text}` — вопрос игрока конкретному агенту
+- `AgentAnswer` — `{question_id, agent_id, answer_text}` — ответ агента на вопрос игрока
 
 ### Шаг 1.3 — Makefile и .env.example
 
@@ -184,11 +187,27 @@ Env-переменные образа: `AGENT_ID`, `PERSONA_ID`.
 - `message.all` (все фазы) — добавлять в историю
 - `message.mafia` (только мафиози) — добавлять в историю
 - `game.turn.{agent_id}` — сигнал «твоя очередь»
+- `host.question.{agent_id}` — вопрос от игрока, требует ответа
 
-### Шаг 5.6 — Dockerfile агента
+### Шаг 5.6 — REST API агента (для оркестратора)
+
+Каждый агент-контейнер поднимает минимальный FastAPI-сервер:
+
+- `GET /agent/info` — вернуть `AgentInfo` (имя персоны, статус, роль); используется оркестратором для опроса живых агентов
+- Порт задаётся через env-переменную `AGENT_HTTP_PORT` (уникальный для каждого контейнера)
+
+### Шаг 5.7 — Логика ответа на вопрос игрока
+
+При получении `host.question.{agent_id}`:
+
+1. Сформировать контекст: системный промпт + история + текст вопроса
+2. Отправить в `LLM MCP API` (`POST /mcp/generate`)
+3. Опубликовать `AgentAnswer` в `host.answer.{question_id}` (routing key читает admin-панель и оркестратор)
+
+### Шаг 5.8 — Dockerfile агента
 
 - Базовый образ: `python:3.12-slim`
-- Poetry-зависимости: `shared`, `aio_pika`, `httpx`, `chromadb-client`
+- Poetry-зависимости: `shared`, `aio_pika`, `httpx`, `chromadb-client`, `fastapi`, `uvicorn`
 - `CMD ["python", "-m", "agent.main"]`
 
 ---
@@ -222,8 +241,18 @@ Env-переменные образа: `AGENT_ID`, `PERSONA_ID`.
 
 - Удалить агента из списка живых
 - Опубликовать `game.state.eliminated.{agent_id}` — агент прекращает участие
+- Остановить Docker-контейнер агента через Docker SDK (`docker.stop(container_id)`): только запущенные контейнеры участвуют в игре, поэтому физическая остановка гарантирует исключение агента
+- Оркестратор монтирует Docker socket (`/var/run/docker.sock`) и использует `docker` Python SDK для управления контейнерами
 
-### Шаг 6.4 — REST API оркестратора
+### Шаг 6.4а — Опрос сведений об агенте
+
+Оркестратор периодически (или по запросу) обращается к `GET http://{agent_host}:{AGENT_HTTP_PORT}/agent/info` каждого живого агента:
+
+- Результат кешируется в памяти оркестратора
+- Используется для проверки актуального состояния и для передачи информации в admin-панель
+- Агенты, контейнер которых не отвечает, автоматически помечаются выбывшими
+
+### Шаг 6.5 — REST API оркестратора
 
 FastAPI:
 
@@ -231,6 +260,11 @@ FastAPI:
 - `GET /game/state` — текущее состояние игры (фаза, раунд, живые)
 - `POST /game/host/decision` — решение ведущего (одобрить/отклонить/выбрать победителя)
 - `GET /game/messages` — история сообщений текущей игры (SSE для стриминга)
+- `GET /game/agents` — список агентов с их `AgentInfo` (опрашивает все живые контейнеры)
+- `GET /game/agents/{agent_id}` — сведения о конкретном агенте (запрос к контейнеру агента)
+- `POST /game/agents/{agent_id}/question` — задать вопрос агенту от имени игрока; принимает `{question_text}`, публикует `HostQuestion` в `host.question.{agent_id}`, возвращает `question_id` для отслеживания ответа
+- `GET /game/agents/{agent_id}/question/{question_id}` — получить ответ агента (polling или SSE)
+- `DELETE /game/agents/{agent_id}` — принудительно остановить контейнер агента (экстренное управление)
 
 ---
 
@@ -261,6 +295,13 @@ FastAPI:
 - «Начать новую игру» → `POST /game/start`
 - Лог событий (выбывания, смены фаз)
 
+### Шаг 7.5 — Интерфейс вопросов игрока
+
+- В фазе `HOST_DECISION` (и в любой момент по желанию) — форма выбора агента из выпадающего списка + текстовое поле вопроса
+- Отправка: `POST /game/agents/{agent_id}/question`
+- Ответ агента отображается в ленте сообщений с пометкой 💬 (вопрос от ведущего)
+- Admin-панель подписана на `host.answer.*` через RabbitMQ и обновляет ленту в реальном времени
+
 ---
 
 ## Фаза 8: Docker Compose — полный стек
@@ -279,13 +320,21 @@ FastAPI:
 | `chromadb`           | `chromadb/chroma`           | 8000        | —                         |
 | `vectordb-seed`      | `services/vectordb/`        | —           | chromadb                  |
 | `orchestrator`       | `services/orchestrator/`    | 8081        | llm, rabbit, chroma       |
-| `agent-1`..`agent-10`| `services/agent/`           | —           | orchestrator, rabbit, llm |
+| `agent-1`..`agent-10`| `services/agent/`           | 8101..8110  | orchestrator, rabbit, llm |
 | `admin`              | `services/admin/`           | 8501        | orchestrator              |
 
 ### Шаг 8.2 — Healthchecks и depends_on
 
 Использовать `condition: service_healthy` для Ollama, RabbitMQ, ChromaDB.
 `vectordb-seed` — тип `restart: on-failure`, завершается после инициализации.
+
+Оркестратору монтируется Docker socket для управления контейнерами агентов:
+
+```yaml
+orchestrator:
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+```
 
 ### Шаг 8.3 — Сети и volumes
 
@@ -302,6 +351,8 @@ FastAPI:
 - `test_agent_logic.py` — формирование контекста LLM, обработка сообщений
 - `test_messaging.py` — маршрутизация (mock RabbitMQ через `aio_pika` mocks)
 - `test_vote_resolution.py` — все сценарии: консенсус, ничья, таймаут
+- `test_agent_api.py` — ответ `/agent/info`, обработка вопроса от игрока (`host.question.*`)
+- `test_orchestrator_docker.py` — остановка контейнера агента (mock Docker SDK), опрос сведений об агенте
 
 ### Шаг 9.2 — Integration-тесты (`tests/integration/`)
 
@@ -362,6 +413,9 @@ Jobs:
 - **Порядок высказываний**: оркестратор последовательно шлёт `game.turn.{id}`, ждёт подтверждения публикации → агенты не «перебивают» друг друга; таймаут не дожидается зависшего агента
 - **Ролевая маршрутизация**: routing key `message.mafia` виден только подписанным мафиозным агентам и admin-панели; горожане физически не получают ночные сообщения
 - **Персоны в VectorDB**: при масштабировании (>10 агентов) семантический поиск позволит подбирать подходящую персону; сейчас выбор детерминирован по `persona_id`
+- **Управление контейнерами**: оркестратор использует Docker SDK через монтированный `/var/run/docker.sock`; остановка контейнера — единственный надёжный способ исключить агента из игры без дополнительной координации
+- **Вопросы игрока**: маршрутизируются через RabbitMQ (`host.question.{agent_id}` → `host.answer.{question_id}`), что позволяет задавать вопросы в любой момент без блокировки игрового цикла
+- **Опрос агентов**: оркестратор обращается напрямую к HTTP API каждого агента (`GET /agent/info`), минуя RabbitMQ — это синхронный запрос «в конкретный контейнер»
 
 ---
 
