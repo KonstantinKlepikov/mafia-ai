@@ -15,6 +15,7 @@ PyYAML = "^6.0"
 annotated-types = "^0.7.0"
 python-dotenv = "^1.0.1"
 pydantic = "^2.12.5"
+ollama = "^0.6.1"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -69,14 +70,15 @@ quote-style = "single"
 [tool.mypy]
 check_untyped_defs = true
 ignore_missing_imports = true
-mypy_path = ["services", "shared", "tests"]
+mypy_path = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 
 [tool.pytest.ini_options]
+pythonpath = "src"
 python_files = "test_*.py"
 testpaths = "tests"
 norecursedirs = ["venv*", ".venv"]
 disable_test_id_escaping_and_forfeit_all_rights_to_community_support = true
-addopts = "-v -x -s -p no:warnings -m main"
+addopts = "-v -x -s -p no:warnings"
 asyncio_mode = "auto"

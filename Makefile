@@ -9,4 +9,4 @@ help:
 
 # target: check - check flake8 and mypy
 check:
-	pytest; mypy services; mypy shared; mypy tests; flake8 services; flake8 shared; flake8 tests
+	pytest; mypy src; mypy tests; flake8 src; flake8 tests
