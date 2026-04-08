@@ -1,0 +1,59 @@
+services:
+  mafia-ai-rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "35672:5672"
+      - "35673:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mafia-ai-vectordb:
+    image: qdrant/qdrant:latest
+    ports:
+      - "36333:6333"
+    volumes:
+      - vectordb_data:/qdrant/storage
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mafia-ai-ollama:
+    build:
+      context: ./ollama
+      dockerfile: Dockerfile
+    ports:
+      - "31434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+networks:
+  game_net:
+    driver: bridge
+
+volumes:
+  ollama_data:
+  vectordb_data:

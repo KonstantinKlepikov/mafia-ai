@@ -1,12 +1,25 @@
-# target: all - Default target. Does nothing.
-all:
-	echo "Hello, this is make for tiny-rewards-tg"
-	echo "Try 'make help' and search available options"
+COMPOSE_FILE := infra/docker-compose.yml
+ENV_FILE     := .env
 
-# target: help - List of options
+# target: all - Default target.
+all: help
+
+# target: help - List of available targets.
 help:
-	egrep "^# target:" [Mm]akefile
+	@egrep "^# target:" [Mm]akefile
 
-# target: check - check flake8 and mypy
+# target: build - Build all Docker images defined in docker-compose.yml.
+build:
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) build
+
+# target: up - Start all services in detached mode.
+up:
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
+
+# target: down - Stop and remove all containers, networks.
+down:
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down
+
+# target: check - Run tests, mypy and flake8.
 check:
 	pytest; mypy src; mypy tests; flake8 src; flake8 tests

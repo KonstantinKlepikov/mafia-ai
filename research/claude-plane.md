@@ -52,10 +52,10 @@ mafia-ai/
 - `HostQuestion` — `{question_id, target_agent_id, question_text}` — вопрос игрока конкретному агенту
 - `AgentAnswer` — `{question_id, agent_id, answer_text}` — ответ агента на вопрос игрока
 
-### Шаг 1.3 — Makefile и .env.example
+### Шаг 1.3 — Makefile и .env
 
-Цели: `make build`, `make up`, `make down`, `make test`, `make lint`.
-`.env.example` — переменные: `OLLAMA_MODEL`, `RABBITMQ_URL`, `VECTOR_DB_URL`,
+Цели: `make build`, `make up`, `make down`.
+`.env` — переменные: `OLLAMA_MODEL`, `RABBITMQ_URL`, `VECTOR_DB_URL`,
 `PHASE_DURATION_SECONDS`, `AGENT_COUNT`, `MAFIA_COUNT`.
 
 ---
