@@ -16,6 +16,11 @@ annotated-types = "^0.7.0"
 python-dotenv = "^1.0.1"
 pydantic = "^2.12.5"
 ollama = "^0.6.1"
+fastapi = "^0.115"
+uvicorn = { extras = ["standard"], version = "^0.34" }
+httpx = "^0.28"
+pydantic-settings = "^2.13.1"
+loguru = "^0.7.3"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -57,7 +62,6 @@ profile = "black"
 max-line-length = 88
 max-complexity = 10
 extend-immutable-calls = ["Depends"]
-
 
 [tool.ruff]
 line-length = 88

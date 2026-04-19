@@ -50,6 +50,29 @@ services:
       retries: 10
       start_period: 30s
 
+  mafia-ai-llm:
+    build:
+      context: ..
+      dockerfile: infra/llm/Dockerfile
+    ports:
+      - "38080:8080"
+    environment:
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
+      LLM_QUEUE_MAX_SIZE: ${LLM_QUEUE_MAX_SIZE:-10}
+      SERVICENAME: llm
+    depends_on:
+      mafia-ai-ollama:
+        condition: service_healthy
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 networks:
   game_net:
     driver: bridge

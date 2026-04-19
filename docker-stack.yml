@@ -1,0 +1,117 @@
+name: infra
+services:
+  mafia-ai-llm:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/llm/Dockerfile
+    depends_on:
+      mafia-ai-ollama:
+        condition: service_healthy
+    environment:
+      LLM_QUEUE_MAX_SIZE: "10"
+      OLLAMA_MODEL: mistral
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      SERVICENAME: llm
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8080/docs
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8080
+      published: "38080"
+      protocol: tcp
+  mafia-ai-ollama:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai/infra/ollama
+      dockerfile: Dockerfile
+    environment:
+      OLLAMA_MODEL: mistral
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:11434/api/tags
+      timeout: 10s
+      interval: 15s
+      retries: 10
+      start_period: 30s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 11434
+      published: "31434"
+      protocol: tcp
+    volumes:
+    - type: volume
+      source: ollama_data
+      target: /root/.ollama
+      volume: {}
+  mafia-ai-rabbitmq:
+    environment:
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+    healthcheck:
+      test:
+      - CMD
+      - rabbitmq-diagnostics
+      - ping
+      timeout: 5s
+      interval: 10s
+      retries: 5
+    image: rabbitmq:3.13-management-alpine
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 5672
+      published: "35672"
+      protocol: tcp
+    - mode: ingress
+      target: 15672
+      published: "35673"
+      protocol: tcp
+  mafia-ai-vectordb:
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:6333/readyz
+      timeout: 5s
+      interval: 10s
+      retries: 5
+    image: qdrant/qdrant:latest
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 6333
+      published: "36333"
+      protocol: tcp
+    volumes:
+    - type: volume
+      source: vectordb_data
+      target: /qdrant/storage
+      volume: {}
+networks:
+  game_net:
+    name: infra_game_net
+    driver: bridge
+volumes:
+  ollama_data:
+    name: infra_ollama_data
+  vectordb_data:
+    name: infra_vectordb_data

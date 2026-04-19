@@ -37,3 +37,4 @@ Use `research` folder for experiments and prompts.
 Endpoints
 
 - [rq-ui](http://localhost:35673)
+- [llm/docs](http://localhost:38080/docs)
