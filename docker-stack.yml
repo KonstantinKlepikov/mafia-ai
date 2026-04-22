@@ -57,6 +57,18 @@ services:
       source: ollama_data
       target: /root/.ollama
       volume: {}
+  mafia-ai-otel-collector:
+    command:
+    - --config=/etc/otel-collector-config.yaml
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    networks:
+      game_net: null
+    volumes:
+    - type: bind
+      source: /home/kklepikov/_code_/mafia-ai/infra/vectordb/otel-collector-config.yaml
+      target: /etc/otel-collector-config.yaml
+      bind:
+        create_host_path: true
   mafia-ai-rabbitmq:
     environment:
       RABBITMQ_DEFAULT_PASS: guest
@@ -82,36 +94,55 @@ services:
       published: "35673"
       protocol: tcp
   mafia-ai-vectordb:
+    depends_on:
+      mafia-ai-otel-collector:
+        condition: service_started
+      mafia-ai-zipkin:
+        condition: service_started
     environment:
-      QDRANT__TELEMETRY_DISABLED: "true"
-    healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:6333/readyz
-      timeout: 5s
-      interval: 10s
-      retries: 5
-    image: qdrant/qdrant:latest
+      CHROMA_OPEN_TELEMETRY__ENDPOINT: http://mafia-ai-otel-collector:4317/
+      CHROMA_OPEN_TELEMETRY__SERVICE_NAME: chroma
+    image: chromadb/chroma
     networks:
       game_net: null
     ports:
     - mode: ingress
-      target: 6333
+      target: 8000
       published: "36333"
       protocol: tcp
     volumes:
     - type: volume
-      source: vectordb_data
-      target: /qdrant/storage
+      source: chroma_data
+      target: /data
       volume: {}
+  mafia-ai-vectordb-seed:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/vectordb/Dockerfile
+    depends_on:
+      mafia-ai-vectordb:
+        condition: service_started
+    networks:
+      game_net: null
+    restart: "no"
+  mafia-ai-zipkin:
+    depends_on:
+      mafia-ai-otel-collector:
+        condition: service_started
+    image: openzipkin/zipkin
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 9411
+      published: "29411"
+      protocol: tcp
 networks:
   game_net:
     name: infra_game_net
     driver: bridge
 volumes:
+  chroma_data:
+    name: infra_chroma_data
   ollama_data:
     name: infra_ollama_data
-  vectordb_data:
-    name: infra_vectordb_data

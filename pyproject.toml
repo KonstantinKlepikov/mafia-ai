@@ -21,6 +21,8 @@ uvicorn = { extras = ["standard"], version = "^0.34" }
 httpx = "^0.28"
 pydantic-settings = "^2.13.1"
 loguru = "^0.7.3"
+requests = "^2.33.1"
+chromadb = "^1.5.8"
 
 
 [tool.poetry.group.dev.dependencies]

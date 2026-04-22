@@ -15,21 +15,41 @@ services:
       timeout: 5s
       retries: 5
 
-  mafia-ai-vectordb:
-    image: qdrant/qdrant:latest
-    ports:
-      - "36333:6333"
+  mafia-ai-otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
-      - vectordb_data:/qdrant/storage
-    environment:
-      QDRANT__TELEMETRY_DISABLED: "true"
+      - ${PWD}/infra/vectordb/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     networks:
       - game_net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+
+  mafia-ai-zipkin:
+    image: openzipkin/zipkin
+    ports:
+      - "29411:9411"
+    depends_on: [mafia-ai-otel-collector]
+    networks:
+      - game_net
+
+  mafia-ai-vectordb:
+    image: chromadb/chroma
+    volumes:
+      - chroma_data:/data
+    ports:
+      - "36333:8000"
+    networks:
+      - game_net
+    environment:
+      - CHROMA_OPEN_TELEMETRY__ENDPOINT=http://mafia-ai-otel-collector:4317/
+      - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=chroma
+    depends_on:
+      - mafia-ai-otel-collector
+      - mafia-ai-zipkin
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+    #   interval: 15s
+    #   timeout: 5s
+    #   retries: 3
 
   mafia-ai-ollama:
     build:
@@ -73,10 +93,21 @@ services:
       retries: 5
       start_period: 10s
 
+  mafia-ai-vectordb-seed:
+    build:
+      context: ..
+      dockerfile: infra/vectordb/Dockerfile
+    depends_on:
+      mafia-ai-vectordb:
+        condition: service_started
+    networks:
+      - game_net
+    restart: "no"
+
 networks:
   game_net:
     driver: bridge
 
 volumes:
   ollama_data:
-  vectordb_data:
+  chroma_data:

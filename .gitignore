@@ -186,3 +186,4 @@ cython_debug/
 # CurrentProject
 poetry.toml
 .python-version
+docker-stack.yml
