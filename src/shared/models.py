@@ -181,3 +181,20 @@ class AgentAnswer(BaseModel):
     question_id: str = Field(..., description='ID of the question being answered')
     agent_id: str = Field(..., description='ID of the answering agent')
     answer_text: str = Field(..., description='Generated answer text')
+
+
+class SystemPrompt(BaseModel):
+    """Persona document retrieved from VectorDB.
+
+    Mirrors the structure stored by `seed_prompts.py`:
+    - `persona_id` — Chroma document id (UUID)
+    - `name` — persona display name, e.g. `persona_1_добряк`
+    - `persona_type` — character archetype string, e.g. `добряк`
+    - `prompt` — full system prompt text sent to the LLM
+
+    """
+
+    persona_id: str = Field(..., description='Chroma document id (UUID)')
+    name: str = Field(..., description='Persona display name')
+    persona_type: str = Field(..., description='Character archetype')
+    prompt: str = Field(..., description='System prompt text for the LLM')

@@ -1,5 +1,5 @@
 COMPOSE_FILE := infra/docker-compose.yml
-ENV_FILE     := .env
+ENV_FILE     := infra/.env
 
 # target: all - Default target.
 all: help

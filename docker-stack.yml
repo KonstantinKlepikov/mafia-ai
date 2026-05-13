@@ -8,10 +8,17 @@ services:
       mafia-ai-ollama:
         condition: service_healthy
     environment:
+      AGENT_COUNT: "10"
       LLM_QUEUE_MAX_SIZE: "10"
-      OLLAMA_MODEL: mistral
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
       OLLAMA_URL: http://mafia-ai-ollama:11434
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
     healthcheck:
       test:
       - CMD
@@ -34,7 +41,15 @@ services:
       context: /home/kklepikov/_code_/mafia-ai/infra/ollama
       dockerfile: Dockerfile
     environment:
-      OLLAMA_MODEL: mistral
+      AGENT_COUNT: "10"
+      LLM_QUEUE_MAX_SIZE: "10"
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      VECTOR_DB_URL: http://vectordb:6333
     healthcheck:
       test:
       - CMD
@@ -71,8 +86,15 @@ services:
         create_host_path: true
   mafia-ai-rabbitmq:
     environment:
+      AGENT_COUNT: "10"
+      LLM_QUEUE_MAX_SIZE: "10"
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      PHASE_DURATION_SECONDS: "60"
       RABBITMQ_DEFAULT_PASS: guest
       RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      VECTOR_DB_URL: http://vectordb:6333
     healthcheck:
       test:
       - CMD
@@ -81,7 +103,7 @@ services:
       timeout: 5s
       interval: 10s
       retries: 5
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:4.3-management-alpine
     networks:
       game_net: null
     ports:
@@ -93,6 +115,17 @@ services:
       target: 15672
       published: "35673"
       protocol: tcp
+    volumes:
+    - type: bind
+      source: /home/kklepikov/_code_/mafia-ai/infra/rabbitmq/rabbitmq.conf
+      target: /etc/rabbitmq/conf.d/10-mafia.conf
+      bind:
+        create_host_path: true
+    - type: bind
+      source: /home/kklepikov/_code_/mafia-ai/infra/rabbitmq/definitions.json
+      target: /etc/rabbitmq/definitions.json
+      bind:
+        create_host_path: true
   mafia-ai-vectordb:
     depends_on:
       mafia-ai-otel-collector:

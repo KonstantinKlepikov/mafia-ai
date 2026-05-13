@@ -1,12 +1,17 @@
 services:
   mafia-ai-rabbitmq:
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:4.3-management-alpine
+    env_file:
+      - .env
     ports:
       - "35672:5672"
       - "35673:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER?Variable not set}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS?Variable not set}
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/10-mafia.conf
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
     networks:
       - game_net
     healthcheck:
@@ -52,6 +57,8 @@ services:
     #   retries: 3
 
   mafia-ai-ollama:
+    env_file:
+      - .env
     build:
       context: ./ollama
       dockerfile: Dockerfile
@@ -60,7 +67,7 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     environment:
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
+      - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
     networks:
       - game_net
     healthcheck:
@@ -71,16 +78,18 @@ services:
       start_period: 30s
 
   mafia-ai-llm:
+    env_file:
+      - .env
     build:
       context: ..
       dockerfile: infra/llm/Dockerfile
     ports:
       - "38080:8080"
     environment:
-      OLLAMA_URL: http://mafia-ai-ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
-      LLM_QUEUE_MAX_SIZE: ${LLM_QUEUE_MAX_SIZE:-10}
-      SERVICENAME: llm
+      - OLLAMA_URL=http://mafia-ai-ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
+      - LLM_QUEUE_MAX_SIZE=${LLM_QUEUE_MAX_SIZE?Variable not set}
+      - SERVICENAME=llm
     depends_on:
       mafia-ai-ollama:
         condition: service_healthy

@@ -4,11 +4,11 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request
+from loguru import logger
 
 from .config import settings
-from .schemas.llm_schemas import GenerateRequest, GenerateResponse, ResetResponse
 from .core.service import LLMService
-from loguru import logger
+from .schemas.llm_schemas import GenerateRequest, GenerateResponse, ResetResponse
 
 
 @asynccontextmanager

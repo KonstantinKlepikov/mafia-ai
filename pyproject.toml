@@ -23,6 +23,7 @@ pydantic-settings = "^2.13.1"
 loguru = "^0.7.3"
 requests = "^2.33.1"
 chromadb = "^1.5.8"
+aio-pika = "^9.5"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -31,7 +32,6 @@ pytest-asyncio = "^1.0"
 pytest-cov = "^7.0"
 flake8 = "^7.0"
 flake8-broken-line = "^1.0"
-flake8-return = "^1.0"
 flake8-isort = "^7.0"
 flake8-quotes = "^3.0"
 flake8-bugbear = "^25.0.0"

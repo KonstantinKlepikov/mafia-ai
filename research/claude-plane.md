@@ -55,7 +55,7 @@ mafia-ai/
 ### Шаг 1.3 — Makefile и .env
 
 Цели: `make build`, `make up`, `make down`.
-`.env` — переменные: `OLLAMA_MODEL`, `RABBITMQ_URL`, `VECTOR_DB_URL`,
+`.env` — переменные: `OLLAMA_MODEL`, `VECTOR_DB_URL`,
 `PHASE_DURATION_SECONDS`, `AGENT_COUNT`, `MAFIA_COUNT`.
 
 ---

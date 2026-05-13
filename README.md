@@ -30,13 +30,15 @@ Use local
 - `make down` — stop and remove all containers and networks
 - `make check` — run tests, mypy and flake8
 
+`docker compose -f docker-stack.yml restart mafia-ai-rabbitmq` service restart example
+
 Use `infra` folder for difinition of docker images, related to development.
 
 Use `research` folder for experiments and prompts.
 
 Endpoints
 
-- [rq-ui](http://localhost:35673)
+- [rq-ui](http://localhost:35673) guest/guest
 - [llm/docs](http://localhost:38080/docs)
 - [chroma-db](http://localhost:36333)
 - [zipkin telemetry](http://localhost:29411)

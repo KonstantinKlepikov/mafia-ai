@@ -9,9 +9,12 @@ from .models import (
     GamePhase,
     GameState,
     Message,
+    SystemPrompt,
     TargetAudience,
     VoteEvent,
 )
+from .vectordb_client import VectorDBClient
+from .messaging import MessagingClient
 
 __all__ = [
     'AgentRole',
@@ -21,4 +24,7 @@ __all__ = [
     'VoteEvent',
     'GameState',
     'AgentState',
+    'SystemPrompt',
+    'VectorDBClient',
+    'MessagingClient',
 ]
