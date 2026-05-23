@@ -28,16 +28,16 @@ class AppSettings(BaseSettings):
     chroma_port: int = 8000
     collection_name: str = 'agent_personas'
     persona_types: list[str] = [
-        'добряк',
-        'истеричка',
-        'конспиролог',
-        'аристократ',
-        'домохозяйка',
-        'проститутка',
-        'невростеник',
-        'клерикал',
-        'поэтесса',
-        'простофиля',
+        'good_natured',
+        'hysteric',
+        'conspiracy_theorist',
+        'aristocrat',
+        'housewife',
+        'seductress',
+        'neurasthenic',
+        'clericalist',
+        'poetess',
+        'simpleton',
     ]
 
 

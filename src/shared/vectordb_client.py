@@ -65,6 +65,31 @@ class VectorDBClient:
             )
         ]
 
+    def get_persona_by_name(self, name: str) -> SystemPrompt:
+        """Retrieve a single persona by its ``name`` metadata field.
+
+        Args:
+            name: Persona name as stored in metadata, e.g. ``persona_1_good_natured``.
+
+        Returns:
+            SystemPrompt populated from the stored document and metadata.
+
+        Raises:
+            ValueError: If no persona with the given name exists.
+
+        """
+        result = self._collection.get(
+            where={'name': {'$eq': name}},
+            include=['documents', 'metadatas'],
+        )
+        if not result['ids']:
+            raise ValueError(f'Persona not found by name: {name}')
+        return self._to_system_prompt(
+            persona_id=result['ids'][0],
+            document=result['documents'][0],
+            metadata=result['metadatas'][0],
+        )
+
     @staticmethod
     def _to_system_prompt(
         persona_id: str,

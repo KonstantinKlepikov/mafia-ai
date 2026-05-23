@@ -9,12 +9,12 @@ from collections.abc import Awaitable, Callable
 
 import aio_pika
 
-from .models import Message, VoteEvent
+from .models import AgentAnswer, AgentInit, Message, VoteEvent
 
 EXCHANGE_NAME = 'game_events'
 
 # Payload types published to the exchange
-Payload = Message | VoteEvent
+Payload = Message | VoteEvent | AgentAnswer | AgentInit
 
 # Callback signature: (routing_key, raw JSON body)
 MessageCallback = Callable[[str, bytes], Awaitable[None]]

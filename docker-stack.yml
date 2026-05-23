@@ -1,5 +1,465 @@
 name: infra
 services:
+  mafia-ai-agent-1:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-1
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_1_good_natured
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38101"
+      protocol: tcp
+  mafia-ai-agent-2:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-2
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_2_hysteric
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38102"
+      protocol: tcp
+  mafia-ai-agent-3:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-3
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_3_conspiracy_theorist
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38103"
+      protocol: tcp
+  mafia-ai-agent-4:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-4
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_4_aristocrat
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38104"
+      protocol: tcp
+  mafia-ai-agent-5:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-5
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_5_housewife
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38105"
+      protocol: tcp
+  mafia-ai-agent-6:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-6
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_6_seductress
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38106"
+      protocol: tcp
+  mafia-ai-agent-7:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-7
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_7_neurasthenic
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38107"
+      protocol: tcp
+  mafia-ai-agent-8:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-8
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_8_clericalist
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38108"
+      protocol: tcp
+  mafia-ai-agent-9:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-9
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_9_poetess
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38109"
+      protocol: tcp
+  mafia-ai-agent-10:
+    build:
+      context: /home/kklepikov/_code_/mafia-ai
+      dockerfile: infra/agent/Dockerfile
+    depends_on:
+      mafia-ai-llm:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AGENT_ID: agent-10
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+      LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
+      MAFIA_COUNT: "2"
+      OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
+      PERSONA_ID: persona_10_simpleton
+      PHASE_DURATION_SECONDS: "60"
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: guest
+      SERVICENAME: llm
+      VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -sf
+      - http://localhost:8100/agent/info
+      timeout: 5s
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      game_net: null
+    ports:
+    - mode: ingress
+      target: 8100
+      published: "38110"
+      protocol: tcp
   mafia-ai-llm:
     build:
       context: /home/kklepikov/_code_/mafia-ai
@@ -9,16 +469,20 @@ services:
         condition: service_healthy
     environment:
       AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
       LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
       MAFIA_COUNT: "2"
       OLLAMA_MODEL: ministral-3
       OLLAMA_URL: http://mafia-ai-ollama:11434
       PHASE_DURATION_SECONDS: "60"
       RABBITMQ_DEFAULT_PASS: guest
       RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       SERVICENAME: llm
       VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
     healthcheck:
       test:
       - CMD
@@ -42,14 +506,20 @@ services:
       dockerfile: Dockerfile
     environment:
       AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
       LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
       MAFIA_COUNT: "2"
       OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
       PHASE_DURATION_SECONDS: "60"
       RABBITMQ_DEFAULT_PASS: guest
       RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      SERVICENAME: llm
       VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
     healthcheck:
       test:
       - CMD
@@ -87,14 +557,20 @@ services:
   mafia-ai-rabbitmq:
     environment:
       AGENT_COUNT: "10"
+      AGENT_HTTP_PORT: "8100"
+      AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
       LLM_QUEUE_MAX_SIZE: "10"
+      LLM_URL: http://mafia-ai-llm:8080
       MAFIA_COUNT: "2"
       OLLAMA_MODEL: ministral-3
+      OLLAMA_URL: http://mafia-ai-ollama:11434
       PHASE_DURATION_SECONDS: "60"
       RABBITMQ_DEFAULT_PASS: guest
       RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      SERVICENAME: llm
       VECTOR_DB_URL: http://vectordb:6333
+      VECTORDB_HOST: mafia-ai-vectordb
+      VECTORDB_PORT: "8000"
     healthcheck:
       test:
       - CMD
@@ -179,3 +655,33 @@ volumes:
     name: infra_chroma_data
   ollama_data:
     name: infra_ollama_data
+x-agent-base:
+  build:
+    context: ..
+    dockerfile: infra/agent/Dockerfile
+  depends_on:
+    mafia-ai-llm:
+      condition: service_healthy
+    mafia-ai-rabbitmq:
+      condition: service_healthy
+    mafia-ai-vectordb-seed:
+      condition: service_completed_successfully
+  env_file:
+  - .env
+  healthcheck:
+    interval: 10s
+    retries: 5
+    start_period: 15s
+    test:
+    - CMD
+    - curl
+    - -sf
+    - http://localhost:8100/agent/info
+    timeout: 5s
+  networks:
+  - game_net
+x-agent-env:
+  AGENT_HTTP_PORT: "8100"
+  AMQP_URL: amqp://guest:guest@mafia-ai-rabbitmq:5672/
+  LLM_URL: http://mafia-ai-llm:8080
+  VECTORDB_HOST: mafia-ai-vectordb

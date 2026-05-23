@@ -37,6 +37,21 @@ class GamePhase(str, Enum):
     GAME_OVER = 'GAME_OVER'
 
 
+class PersonaType(str, Enum):
+    """Type of persona"""
+
+    GOOD_NATURED = 'good_natured'
+    HYSTERIC = 'hysteric'
+    CONSPIRACY_THEORIST = 'conspiracy_theorist'
+    ARISTOCRAT = 'aristocrat'
+    HOUSEWIFE = 'housewife'
+    SEDUCTRESS = 'seductress'
+    NEURASTENIC = 'neurasthenic'
+    CLERICALIST = 'clericalist'
+    POETESS = 'poetess'
+    SIMPLETON = 'simpleton'
+
+
 class TargetAudience(str, Enum):
     """Intended audience for a message.
 
@@ -183,13 +198,25 @@ class AgentAnswer(BaseModel):
     answer_text: str = Field(..., description='Generated answer text')
 
 
+class AgentInit(BaseModel):
+    """Role-assignment message sent by the orchestrator to a specific agent.
+
+    Published to routing key ``game.init.{agent_id}`` at game start.
+    Each agent receives only its own message via a personalised routing key.
+
+    """
+
+    agent_id: str = Field(..., description='ID of the agent being initialised')
+    role: AgentRole = Field(..., description='Assigned game role (MAFIA or CITIZEN)')
+
+
 class SystemPrompt(BaseModel):
     """Persona document retrieved from VectorDB.
 
     Mirrors the structure stored by `seed_prompts.py`:
     - `persona_id` — Chroma document id (UUID)
-    - `name` — persona display name, e.g. `persona_1_добряк`
-    - `persona_type` — character archetype string, e.g. `добряк`
+    - `name` — persona display name, e.g. `persona_1_good_natured`
+    - `persona_type` — character archetype string, e.g. `good_natured`
     - `prompt` — full system prompt text sent to the LLM
 
     """

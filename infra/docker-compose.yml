@@ -1,3 +1,31 @@
+x-agent-base: &agent-base
+  env_file:
+    - .env
+  build:
+    context: ..
+    dockerfile: infra/agent/Dockerfile
+  networks:
+    - game_net
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost:8100/agent/info"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 15s
+  depends_on:
+    mafia-ai-rabbitmq:
+      condition: service_healthy
+    mafia-ai-llm:
+      condition: service_healthy
+    mafia-ai-vectordb-seed:
+      condition: service_completed_successfully
+
+x-agent-env: &agent-env
+  AGENT_HTTP_PORT: ${AGENT_HTTP_PORT?Variable not set}
+  AMQP_URL: ${AMQP_URL?Variable not set}
+  LLM_URL: ${LLM_URL?Variable not set}
+  VECTORDB_HOST: ${VECTORDB_HOST?Variable not set}
+
 services:
   mafia-ai-rabbitmq:
     image: rabbitmq:4.3-management-alpine
@@ -86,10 +114,10 @@ services:
     ports:
       - "38080:8080"
     environment:
-      - OLLAMA_URL=http://mafia-ai-ollama:11434
+      - OLLAMA_URL=${OLLAMA_URL?Variable not set}
       - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
       - LLM_QUEUE_MAX_SIZE=${LLM_QUEUE_MAX_SIZE?Variable not set}
-      - SERVICENAME=llm
+      - SERVICENAME=${SERVICENAME?Variable not set}
     depends_on:
       mafia-ai-ollama:
         condition: service_healthy
@@ -112,6 +140,96 @@ services:
     networks:
       - game_net
     restart: "no"
+
+  mafia-ai-agent-1:
+    <<: *agent-base
+    ports:
+      - "38101:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-1
+      PERSONA_ID: persona_1_good_natured
+
+  mafia-ai-agent-2:
+    <<: *agent-base
+    ports:
+      - "38102:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-2
+      PERSONA_ID: persona_2_hysteric
+
+  mafia-ai-agent-3:
+    <<: *agent-base
+    ports:
+      - "38103:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-3
+      PERSONA_ID: persona_3_conspiracy_theorist
+
+  mafia-ai-agent-4:
+    <<: *agent-base
+    ports:
+      - "38104:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-4
+      PERSONA_ID: persona_4_aristocrat
+
+  mafia-ai-agent-5:
+    <<: *agent-base
+    ports:
+      - "38105:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-5
+      PERSONA_ID: persona_5_housewife
+
+  mafia-ai-agent-6:
+    <<: *agent-base
+    ports:
+      - "38106:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-6
+      PERSONA_ID: persona_6_seductress
+
+  mafia-ai-agent-7:
+    <<: *agent-base
+    ports:
+      - "38107:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-7
+      PERSONA_ID: persona_7_neurasthenic
+
+  mafia-ai-agent-8:
+    <<: *agent-base
+    ports:
+      - "38108:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-8
+      PERSONA_ID: persona_8_clericalist
+
+  mafia-ai-agent-9:
+    <<: *agent-base
+    ports:
+      - "38109:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-9
+      PERSONA_ID: persona_9_poetess
+
+  mafia-ai-agent-10:
+    <<: *agent-base
+    ports:
+      - "38110:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-10
+      PERSONA_ID: persona_10_simpleton
 
 networks:
   game_net:

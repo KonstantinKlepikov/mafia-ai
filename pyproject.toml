@@ -76,12 +76,16 @@ quote-style = "single"
 [tool.mypy]
 check_untyped_defs = true
 ignore_missing_imports = true
+exclude = [
+    ".venv/",
+]
+
 mypy_path = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 
 [tool.pytest.ini_options]
-pythonpath = "src"
+pythonpath = ["src", "tests"]
 python_files = "test_*.py"
 testpaths = "tests"
 norecursedirs = ["venv*", ".venv"]

@@ -18,7 +18,7 @@ up:
 
 # target: serve - run docker-compose
 serve:
-	@sh ./scripts/up-dev.sh
+	@sh infra/up-dev.sh
 
 # target: down - Stop and remove all containers, networks.
 down:
