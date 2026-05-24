@@ -6,9 +6,15 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, HTTPException, Request
 from loguru import logger
 
+from shared.telemetry import configure_loguru, instrument_app, setup_tracing
+
 from .config import settings
 from .core.service import LLMService
 from .schemas.llm_schemas import GenerateRequest, GenerateResponse, ResetResponse
+
+_SERVICE_NAME = 'llm-service'
+setup_tracing(_SERVICE_NAME)
+configure_loguru(_SERVICE_NAME)
 
 
 @asynccontextmanager
@@ -31,6 +37,7 @@ app = FastAPI(
     version='0.1.0',
     lifespan=_lifespan,
 )
+instrument_app(app, _SERVICE_NAME)
 
 
 @app.post('/mcp/generate', response_model=GenerateResponse)

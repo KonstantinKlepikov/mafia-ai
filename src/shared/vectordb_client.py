@@ -1,6 +1,7 @@
 """VectorDB client for retrieving agent persona documents from ChromaDB."""
 
 import chromadb
+from chromadb import Collection
 
 from .models import SystemPrompt
 
@@ -22,7 +23,14 @@ class VectorDBClient:
         collection_name: str = 'agent_personas',
     ) -> None:
         self._client = chromadb.HttpClient(host=host, port=port)
-        self._collection = self._client.get_collection(collection_name)
+        self._collection_name = collection_name
+        self._collection: Collection | None = None
+
+    def _get_collection(self) -> Collection:
+        """Return the ChromaDB collection, connecting lazily on first call."""
+        if self._collection is None:
+            self._collection = self._client.get_collection(self._collection_name)
+        return self._collection
 
     def get_persona(self, persona_id: str) -> SystemPrompt:
         """Retrieve a single persona by its Chroma document id.
@@ -37,7 +45,7 @@ class VectorDBClient:
             ValueError: If no document with the given id exists.
 
         """
-        result = self._collection.get(
+        result = self._get_collection().get(
             ids=[persona_id],
             include=['documents', 'metadatas'],
         )
@@ -57,7 +65,7 @@ class VectorDBClient:
             List of SystemPrompt objects, one per stored persona document.
 
         """
-        result = self._collection.get(include=['documents', 'metadatas'])
+        result = self._get_collection().get(include=['documents', 'metadatas'])
         return [
             self._to_system_prompt(pid, doc, meta)
             for pid, doc, meta in zip(
@@ -78,7 +86,7 @@ class VectorDBClient:
             ValueError: If no persona with the given name exists.
 
         """
-        result = self._collection.get(
+        result = self._get_collection().get(
             where={'name': {'$eq': name}},
             include=['documents', 'metadatas'],
         )

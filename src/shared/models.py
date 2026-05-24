@@ -225,3 +225,38 @@ class SystemPrompt(BaseModel):
     name: str = Field(..., description='Persona display name')
     persona_type: str = Field(..., description='Character archetype')
     prompt: str = Field(..., description='System prompt text for the LLM')
+
+
+class TurnSignal(BaseModel):
+    """Signal from the orchestrator to an agent that it is their turn to act.
+
+    Published to routing key ``game.turn.{agent_id}``.
+    The agent determines the action (speak or vote) from the current game phase.
+
+    """
+
+    agent_id: str = Field(..., description='ID of the agent to act')
+    phase: GamePhase = Field(..., description='Current game phase')
+    round: int = Field(..., ge=0, description='Current round number')
+
+
+class HostDecisionAction(str, Enum):
+    """Possible actions a host can take at the HOST_DECISION phase."""
+
+    APPROVE = 'APPROVE'
+    REJECT = 'REJECT'
+    OVERRIDE = 'OVERRIDE'
+
+
+class HostDecision(BaseModel):
+    """Decision from the human host submitted via the REST API.
+
+    Used at HOST_DECISION phase to finalise day-vote results.
+
+    """
+
+    action: HostDecisionAction = Field(..., description='Decision action')
+    target_id: str | None = Field(
+        None,
+        description='Agent to eliminate; required when action is OVERRIDE',
+    )

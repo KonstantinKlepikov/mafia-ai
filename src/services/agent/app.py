@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -5,9 +6,14 @@ from fastapi import FastAPI, Request
 from loguru import logger
 
 from shared.models import AgentInfo
+from shared.telemetry import configure_loguru, instrument_app, setup_tracing
 
 from .config import AgentSettings
 from .core.service import AgentService
+
+_SERVICE_NAME = f'agent-{os.getenv("AGENT_ID", "unknown")}'
+setup_tracing(_SERVICE_NAME)
+configure_loguru(_SERVICE_NAME)
 
 
 @asynccontextmanager
@@ -33,6 +39,7 @@ app = FastAPI(
     version='0.1.0',
     lifespan=_lifespan,
 )
+instrument_app(app, _SERVICE_NAME)
 
 
 @app.get('/agent/info', response_model=AgentInfo)

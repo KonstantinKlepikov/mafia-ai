@@ -17,7 +17,6 @@ import time
 import uuid
 
 import chromadb
-from chromadb.config import Settings
 from loguru import logger
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
@@ -81,12 +80,10 @@ def main() -> None:
     """Connect to Chroma server provided by environment or default service name"""
     app_settings = AppSettings()  # load from env if provided
 
-    settings = Settings(
-        chroma_server_host=app_settings.chroma_host,
-        chroma_server_http_port=app_settings.chroma_port,
+    client = chromadb.HttpClient(
+        host=app_settings.chroma_host,
+        port=app_settings.chroma_port,
     )
-
-    client = chromadb.Client(settings)
 
     # Ensure Chroma is healthy / reachable
     for _ in range(10):

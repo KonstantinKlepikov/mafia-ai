@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import ollama
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from services.llm.core.service import LLMService, _call_ollama
 from services.llm.schemas.llm_schemas import (
     GenerateRequest,
     GenerateResponse,
@@ -13,12 +16,6 @@ from services.llm.schemas.llm_schemas import (
     ResetResponse,
     Usage,
 )
-from services.llm.core.service import LLMService, _call_ollama
-from pydantic import ValidationError
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_usage(prompt: int = 10, completion: int = 5) -> Usage:
@@ -41,11 +38,6 @@ def _make_request(**kwargs) -> GenerateRequest:
     }
     defaults.update(kwargs)
     return GenerateRequest(**defaults)
-
-
-# ---------------------------------------------------------------------------
-# TestGenerateRequest — model validation
-# ---------------------------------------------------------------------------
 
 
 class TestGenerateRequest:
@@ -91,11 +83,6 @@ class TestGenerateRequest:
         )
 
 
-# ---------------------------------------------------------------------------
-# TestUsageModel
-# ---------------------------------------------------------------------------
-
-
 class TestUsageModel:
     def test_total_tokens_computed_correctly(self) -> None:
         """Test: Usage total_tokens equals prompt + completion"""
@@ -103,11 +90,6 @@ class TestUsageModel:
         assert usage.total_tokens == 10, (
             'total_tokens must equal prompt_tokens + completion_tokens'
         )
-
-
-# ---------------------------------------------------------------------------
-# TestResetResponse
-# ---------------------------------------------------------------------------
 
 
 class TestResetResponse:
@@ -120,11 +102,6 @@ class TestResetResponse:
         """Test: custom status string is stored correctly"""
         resp = ResetResponse(status='cleared')
         assert resp.status == 'cleared', 'Custom status must be stored'
-
-
-# ---------------------------------------------------------------------------
-# TestCallOllama — unit tests for the Ollama adapter function
-# ---------------------------------------------------------------------------
 
 
 class TestCallOllama:
@@ -194,7 +171,8 @@ class TestCallOllama:
 
     @pytest.mark.asyncio
     async def test_usage_tokens_computed_from_ollama_counts(self) -> None:
-        """Test: usage tokens are derived from ollama prompt_eval_count and eval_count"""
+        """Test: usage tokens are derived from ollama
+        prompt_eval_count and eval_count"""
         mock_response = MagicMock()
         mock_response.message.content = 'x'
         mock_response.prompt_eval_count = 10
@@ -227,11 +205,6 @@ class TestCallOllama:
         result = await _call_ollama(mock_client, _make_request())
 
         assert result.usage.total_tokens == 0, 'None counts must default to 0'
-
-
-# ---------------------------------------------------------------------------
-# TestLLMService — queue and worker behaviour
-# ---------------------------------------------------------------------------
 
 
 class TestLLMService:
@@ -313,11 +286,6 @@ class TestLLMService:
         await service.stop()
 
 
-# ---------------------------------------------------------------------------
-# TestMcpGenerateEndpoint — FastAPI endpoint via TestClient
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture()
 def client():
     """Provide a synchronous TestClient with the app lifespan active."""
@@ -385,11 +353,6 @@ class TestMcpGenerateEndpoint:
         assert response.status_code == 503, (
             'Ollama connection error must result in HTTP 503'
         )
-
-
-# ---------------------------------------------------------------------------
-# TestMcpResetEndpoint — FastAPI endpoint via TestClient
-# ---------------------------------------------------------------------------
 
 
 class TestMcpResetEndpoint:

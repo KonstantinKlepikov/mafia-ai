@@ -39,6 +39,7 @@ Use `research` folder for experiments and prompts.
 Endpoints
 
 - [rq-ui](http://localhost:35673) guest/guest
-- [llm/docs](http://localhost:38080/docs)
-- [chroma-db](http://localhost:36333)
 - [zipkin telemetry](http://localhost:29411)
+- [ui](http://localhost:38501)
+- [Grafana](http://localhost:33000) admin/admin — дашборды Mafia-AI — Log Analytics и Mafia-AI — Service Metrics
+- [Prometheus](http://localhost:39090)
