@@ -1,4 +1,7 @@
 import os
+
+os.environ['OTEL_SDK_DISABLED'] = 'true'
+
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Callable, Generator
 from unittest.mock import AsyncMock, MagicMock

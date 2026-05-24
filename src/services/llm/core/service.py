@@ -71,13 +71,27 @@ class LLMService:
         self._worker_task = asyncio.create_task(self._worker())
 
     async def stop(self) -> None:
-        """Cancel the background worker and wait for it to finish."""
+        """Cancel the background worker and fail all pending queued requests.
+
+        Any futures still in the queue are resolved with ``RuntimeError`` so
+        callers blocked in ``generate()`` are unblocked immediately rather than
+        hanging forever.
+        """
         if self._worker_task is not None:
             self._worker_task.cancel()
             try:
                 await self._worker_task
             except asyncio.CancelledError:
                 pass
+
+        shutdown_error = RuntimeError('LLMService is shutting down')
+        while not self._queue.empty():
+            try:
+                item = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if not item.future.done():
+                item.future.set_exception(shutdown_error)
 
     async def _worker(self) -> None:
         """Process queue items sequentially, one at a time."""
@@ -97,7 +111,12 @@ class LLMService:
         """Enqueue a generation request and await the result.
 
         Blocks if the queue is full until a slot becomes available.
+
+        Raises:
+            RuntimeError: If the service has not been started yet.
         """
+        if self._worker_task is None or self._worker_task.done():
+            raise RuntimeError('LLMService is not running; call start() first')
         loop = asyncio.get_running_loop()
         future: asyncio.Future[GenerateResponse] = loop.create_future()
         await self._queue.put(_QueueItem(request=request, future=future))

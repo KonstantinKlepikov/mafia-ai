@@ -25,6 +25,7 @@ x-agent-env: &agent-env
   AMQP_URL: ${AMQP_URL?Variable not set}
   LLM_URL: ${LLM_URL?Variable not set}
   VECTORDB_HOST: ${VECTORDB_HOST?Variable not set}
+  OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED?Variable not set}
   OTEL_EXPORTER_OTLP_ENDPOINT: http://mafia-ai-otel-collector:4317
 
 services:
@@ -119,6 +120,7 @@ services:
       - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
       - LLM_QUEUE_MAX_SIZE=${LLM_QUEUE_MAX_SIZE?Variable not set}
       - SERVICENAME=${SERVICENAME?Variable not set}
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://mafia-ai-otel-collector:4317
     depends_on:
       mafia-ai-ollama:
@@ -154,6 +156,7 @@ services:
       - "38081:8081"
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://mafia-ai-otel-collector:4317
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:

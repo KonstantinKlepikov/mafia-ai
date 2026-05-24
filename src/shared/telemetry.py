@@ -25,6 +25,7 @@ Usage (Streamlit / non-FastAPI)::
     configure_loguru('admin')
 """
 
+import os
 import sys
 from collections.abc import Callable
 from typing import Any
@@ -51,6 +52,8 @@ def setup_tracing(service_name: str) -> None:
     Args:
         service_name: Logical service name reported in traces.
     """
+    if os.getenv('OTEL_SDK_DISABLED', '').lower() == 'true':
+        return
     resource = Resource.create({'service.name': service_name})
     exporter = OTLPSpanExporter()
     provider = TracerProvider(resource=resource)
