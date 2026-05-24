@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: llm-service
+    static_configs:
+      - targets: ["mafia-ai-llm:8080"]
+        labels:
+          service: llm-service
+
+  - job_name: orchestrator
+    static_configs:
+      - targets: ["mafia-ai-orchestrator:8081"]
+        labels:
+          service: orchestrator
+
+  - job_name: agents
+    static_configs:
+      - targets:
+          - "mafia-ai-agent-1:8100"
+          - "mafia-ai-agent-2:8100"
+          - "mafia-ai-agent-3:8100"
+          - "mafia-ai-agent-4:8100"
+          - "mafia-ai-agent-5:8100"
+          - "mafia-ai-agent-6:8100"
+          - "mafia-ai-agent-7:8100"
+          - "mafia-ai-agent-8:8100"
+          - "mafia-ai-agent-9:8100"
+          - "mafia-ai-agent-10:8100"
+        labels:
+          service: agent
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["mafia-ai-otel-collector:8889"]
+        labels:
+          service: otel-collector

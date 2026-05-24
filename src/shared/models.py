@@ -37,6 +37,21 @@ class GamePhase(str, Enum):
     GAME_OVER = 'GAME_OVER'
 
 
+class PersonaType(str, Enum):
+    """Type of persona"""
+
+    GOOD_NATURED = 'good_natured'
+    HYSTERIC = 'hysteric'
+    CONSPIRACY_THEORIST = 'conspiracy_theorist'
+    ARISTOCRAT = 'aristocrat'
+    HOUSEWIFE = 'housewife'
+    SEDUCTRESS = 'seductress'
+    NEURASTENIC = 'neurasthenic'
+    CLERICALIST = 'clericalist'
+    POETESS = 'poetess'
+    SIMPLETON = 'simpleton'
+
+
 class TargetAudience(str, Enum):
     """Intended audience for a message.
 
@@ -181,3 +196,67 @@ class AgentAnswer(BaseModel):
     question_id: str = Field(..., description='ID of the question being answered')
     agent_id: str = Field(..., description='ID of the answering agent')
     answer_text: str = Field(..., description='Generated answer text')
+
+
+class AgentInit(BaseModel):
+    """Role-assignment message sent by the orchestrator to a specific agent.
+
+    Published to routing key ``game.init.{agent_id}`` at game start.
+    Each agent receives only its own message via a personalised routing key.
+
+    """
+
+    agent_id: str = Field(..., description='ID of the agent being initialised')
+    role: AgentRole = Field(..., description='Assigned game role (MAFIA or CITIZEN)')
+
+
+class SystemPrompt(BaseModel):
+    """Persona document retrieved from VectorDB.
+
+    Mirrors the structure stored by `seed_prompts.py`:
+    - `persona_id` — Chroma document id (UUID)
+    - `name` — persona display name, e.g. `persona_1_good_natured`
+    - `persona_type` — character archetype string, e.g. `good_natured`
+    - `prompt` — full system prompt text sent to the LLM
+
+    """
+
+    persona_id: str = Field(..., description='Chroma document id (UUID)')
+    name: str = Field(..., description='Persona display name')
+    persona_type: str = Field(..., description='Character archetype')
+    prompt: str = Field(..., description='System prompt text for the LLM')
+
+
+class TurnSignal(BaseModel):
+    """Signal from the orchestrator to an agent that it is their turn to act.
+
+    Published to routing key ``game.turn.{agent_id}``.
+    The agent determines the action (speak or vote) from the current game phase.
+
+    """
+
+    agent_id: str = Field(..., description='ID of the agent to act')
+    phase: GamePhase = Field(..., description='Current game phase')
+    round: int = Field(..., ge=0, description='Current round number')
+
+
+class HostDecisionAction(str, Enum):
+    """Possible actions a host can take at the HOST_DECISION phase."""
+
+    APPROVE = 'APPROVE'
+    REJECT = 'REJECT'
+    OVERRIDE = 'OVERRIDE'
+
+
+class HostDecision(BaseModel):
+    """Decision from the human host submitted via the REST API.
+
+    Used at HOST_DECISION phase to finalise day-vote results.
+
+    """
+
+    action: HostDecisionAction = Field(..., description='Decision action')
+    target_id: str | None = Field(
+        None,
+        description='Agent to eliminate; required when action is OVERRIDE',
+    )

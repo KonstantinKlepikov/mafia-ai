@@ -25,10 +25,21 @@ virtualenvs.prefer-active-python = true
 
 Use local
 
-- `make serve` not implemented
-- `make down` not implemented
-- `make check` tests, lint and mypy all
+- `make build` — build all Docker images defined in `infra/docker-compose.yml`
+- `make up` — start all services in detached mode
+- `make down` — stop and remove all containers and networks
+- `make check` — run tests, mypy and flake8
+
+`docker compose -f docker-stack.yml restart mafia-ai-rabbitmq` service restart example
 
 Use `infra` folder for difinition of docker images, related to development.
 
 Use `research` folder for experiments and prompts.
+
+Endpoints
+
+- [rq-ui](http://localhost:35673) guest/guest
+- [zipkin telemetry](http://localhost:29411)
+- [ui](http://localhost:38501)
+- [Grafana](http://localhost:33000) admin/admin — дашборды Mafia-AI — Log Analytics и Mafia-AI — Service Metrics
+- [Prometheus](http://localhost:39090)

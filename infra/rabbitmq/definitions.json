@@ -1,0 +1,52 @@
+{
+  "vhosts": [
+    { "name": "/" }
+  ],
+  "users": [
+    {
+      "name": "guest",
+      "password_hash": "ijRGNqUte5rsPXKanvAIVcFMC/CwXEdVWwfhK/RJoNn8AIdN",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": "management"
+    },
+    {
+      "name": "admin",
+      "password_hash": "dzGRFWwsgb0AF8tJzOTLoQECmmaYm717QRb3++vJ4g6mHcfa",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": "administrator"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "game_events",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [],
+  "bindings": [],
+  "permissions": [
+    {
+      "user": "guest",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "admin",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "topic_permissions": [],
+  "parameters": [],
+  "global_parameters": [],
+  "policies": []
+}

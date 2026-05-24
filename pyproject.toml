@@ -16,6 +16,24 @@ annotated-types = "^0.7.0"
 python-dotenv = "^1.0.1"
 pydantic = "^2.12.5"
 ollama = "^0.6.1"
+fastapi = "^0.115"
+uvicorn = { extras = ["standard"], version = "^0.34" }
+httpx = "^0.28"
+pydantic-settings = "^2.13.1"
+loguru = "^0.7.3"
+opentelemetry-api = "^1.27"
+opentelemetry-sdk = "^1.27"
+opentelemetry-exporter-otlp-proto-grpc = "^1.27"
+opentelemetry-instrumentation-fastapi = ">=0.48"
+opentelemetry-instrumentation-httpx = ">=0.48"
+prometheus-client = "^0.21"
+prometheus-fastapi-instrumentator = ">=6.1"
+requests = "^2.33.1"
+chromadb = "^1.5.8"
+aio-pika = "^9.5"
+docker = "^7.0"
+streamlit = "^1.44"
+pandas = "^2.2"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -24,7 +42,6 @@ pytest-asyncio = "^1.0"
 pytest-cov = "^7.0"
 flake8 = "^7.0"
 flake8-broken-line = "^1.0"
-flake8-return = "^1.0"
 flake8-isort = "^7.0"
 flake8-quotes = "^3.0"
 flake8-bugbear = "^25.0.0"
@@ -37,6 +54,7 @@ pytest-bdd = '^8.0'
 
 # custom
 gevent = "^25.0"
+types-requests = "^2.33.0.20260518"
 
 
 [build-system]
@@ -58,7 +76,6 @@ max-line-length = 88
 max-complexity = 10
 extend-immutable-calls = ["Depends"]
 
-
 [tool.ruff]
 line-length = 88
 
@@ -70,12 +87,16 @@ quote-style = "single"
 [tool.mypy]
 check_untyped_defs = true
 ignore_missing_imports = true
+exclude = [
+    ".venv/",
+]
+
 mypy_path = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 
 [tool.pytest.ini_options]
-pythonpath = "src"
+pythonpath = ["src", "tests"]
 python_files = "test_*.py"
 testpaths = "tests"
 norecursedirs = ["venv*", ".venv"]

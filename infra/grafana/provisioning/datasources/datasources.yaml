@@ -1,0 +1,26 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    uid: loki
+    url: http://mafia-ai-loki:3100
+    access: proxy
+    isDefault: true
+    jsonData:
+      maxLines: 5000
+
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    url: http://mafia-ai-prometheus:9090
+    access: proxy
+    jsonData:
+      httpMethod: POST
+      prometheusType: Prometheus
+
+  - name: Zipkin
+    type: zipkin
+    uid: zipkin
+    url: http://mafia-ai-zipkin:9411
+    access: proxy
