@@ -1,7 +1,5 @@
 import os
 
-os.environ['OTEL_SDK_DISABLED'] = 'true'
-
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Callable, Generator
 from unittest.mock import AsyncMock, MagicMock
@@ -18,7 +16,7 @@ from services.agent.core.service import AgentService
 from services.orchestrator.app import app as _orch_app
 from shared.models import AgentInfo, GamePhase, GameState, Message, PersonaType
 
-
+os.environ['OTEL_SDK_DISABLED'] = 'true'
 os.environ.setdefault('AGENT_ID', '_test_agent_')
 os.environ.setdefault('PERSONA_ID', '_test_persona_')
 

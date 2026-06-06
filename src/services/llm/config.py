@@ -6,17 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class LLMSettings(BaseSettings):
     # Base URL of the Ollama REST server
-    ollama_url: HttpUrl = HttpUrl('http://ollama:11434')
+    ollama_url: HttpUrl
 
     # Name of the model to use for generation
-    ollama_model: str = 'mistral'
+    ollama_model: str
 
     # Maximum number of pending requests in the rate-limiting queue.
     # Requests beyond this limit will block until a slot becomes available.
-    llm_queue_max_size: int = 10
-
-    # HTTP port the FastAPI service listens on
-    llm_http_port: int = 8080
+    llm_queue_max_size: int
 
     model_config = SettingsConfigDict(env_prefix='', extra='ignore')
 
