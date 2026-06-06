@@ -19,7 +19,7 @@ class AgentSettings(BaseSettings):
     vectordb_port: int
 
     # Maximum tokens for regular messages; voting uses a shorter limit
-    message_max_tokens: int = 256
-    vote_max_tokens: int = 50
+    message_max_tokens: int
+    vote_max_tokens: int
 
     model_config = SettingsConfigDict(env_prefix='', extra='ignore')

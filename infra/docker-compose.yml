@@ -25,8 +25,10 @@ x-agent-env: &agent-env
   AMQP_URL: ${AMQP_URL?Variable not set}
   LLM_URL: ${LLM_URL?Variable not set}
   VECTORDB_HOST: ${VECTORDB_HOST?Variable not set}
+  MESSAGE_MAX_TOKENS: ${MESSAGE_MAX_TOKENS?Variable not set}
+  VOTE_MAX_TOKENS: ${VOTE_MAX_TOKENS?Variable not set}
   OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED?Variable not set}
-  OTEL_EXPORTER_OTLP_ENDPOINT: http://mafia-ai-otel-collector:4317
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
 
 services:
   mafia-ai-rabbitmq:
@@ -75,8 +77,8 @@ services:
     networks:
       - game_net
     environment:
-      - CHROMA_OPEN_TELEMETRY__ENDPOINT=http://mafia-ai-otel-collector:4317/
-      - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=chroma
+      - CHROMA_OPEN_TELEMETRY__ENDPOINT=${CHROMA_OPEN_TELEMETRY__ENDPOINT?Variable not set}
+      - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=${CHROMA_OPEN_TELEMETRY__SERVICE_NAME?Variable not set}
     depends_on:
       - mafia-ai-otel-collector
       - mafia-ai-zipkin
@@ -121,7 +123,7 @@ services:
       - LLM_QUEUE_MAX_SIZE=${LLM_QUEUE_MAX_SIZE?Variable not set}
       - SERVICENAME=${SERVICENAME?Variable not set}
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://mafia-ai-otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
     depends_on:
       mafia-ai-ollama:
         condition: service_healthy
@@ -155,7 +157,7 @@ services:
     ports:
       - "38081:8081"
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://mafia-ai-otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -180,6 +182,8 @@ services:
     container_name: mafia-ai-admin
     env_file:
       - .env
+    environment:
+      - ORCHESTRATOR_URL=${ORCHESTRATOR_URL?Variable not set}
     ports:
       - "38501:8501"
     networks:
@@ -347,11 +351,11 @@ services:
   mafia-ai-grafana:
     image: grafana/grafana:11.6.0
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-      - GF_USERS_DEFAULT_THEME=dark
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER?Variable not set}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD?Variable not set}
+      - GF_AUTH_ANONYMOUS_ENABLED=${GF_AUTH_ANONYMOUS_ENABLED?Variable not set}
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=${GF_AUTH_ANONYMOUS_ORG_ROLE?Variable not set}
+      - GF_USERS_DEFAULT_THEME=${GF_USERS_DEFAULT_THEME?Variable not set}
     volumes:
       - ${PWD}/infra/grafana/provisioning:/etc/grafana/provisioning
       - ${PWD}/infra/grafana/dashboards:/var/lib/grafana/dashboards

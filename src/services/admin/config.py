@@ -13,6 +13,6 @@ class AdminSettings(BaseSettings):
     """
 
     amqp_url: str
-    orchestrator_url: str = 'http://mafia-ai-orchestrator:8081'
+    orchestrator_url: str
 
     model_config = SettingsConfigDict(env_prefix='', extra='ignore')

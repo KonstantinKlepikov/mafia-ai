@@ -20,7 +20,8 @@ class _QueueItem:
 
 
 async def _call_ollama(
-    client: ollama.AsyncClient, request: GenerateRequest
+    client: ollama.AsyncClient,
+    request: GenerateRequest,
 ) -> GenerateResponse:
     """Send a stateless generation request to Ollama.
 

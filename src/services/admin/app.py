@@ -49,9 +49,6 @@ def _get_client() -> OrchestratorClient:
     return OrchestratorClient(settings.orchestrator_url)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────
-
-
 def _parse_event(ev: sub.FeedEvent) -> tuple[str, object] | None:
     """Parse a raw RabbitMQ event into a (kind, model) feed entry."""
     if ev.kind == sub.EventKind.MESSAGE:
@@ -91,37 +88,42 @@ def _drain_queue() -> None:
 
 
 def _render_feed() -> None:
-    """7.1 — Real-time message feed."""
+    """Real-time message feed."""
     st.subheader('💬 Message Feed')
     feed: list[tuple[str, object]] = st.session_state.get('feed', [])
     if not feed:
         st.info('No messages yet. Start a game to see messages here.')
         return
 
-    for kind, item in feed[-60:]:
-        if kind == 'message':
-            msg: Message = item  # type: ignore[assignment]
-            icon = '🌙' if msg.target_audience == TargetAudience.MAFIA_ONLY else '☀️'
-            st.markdown(
-                f'{icon} **[R{msg.round} · {msg.phase.value}]** '
-                f'`{msg.sender_id}`: {msg.content}'
-            )
-        elif kind == 'answer':
-            ans: AgentAnswer = item  # type: ignore[assignment]
-            st.markdown(f'💬 **[Host Q&A]** `{ans.agent_id}`: {ans.answer_text}')
-        elif kind == 'vote':
-            vote: VoteEvent = item  # type: ignore[assignment]
-            st.markdown(
-                f'🗳️ **[Vote · {vote.phase.value}]** '
-                f'`{vote.voter_id}` → `{vote.target_id}`'
-            )
+    with st.container(height=720, border=False):
+        for kind, item in reversed(feed):
+            if kind == 'message':
+                msg: Message = item  # type: ignore[assignment]
+                icon = '🌙' if msg.target_audience == TargetAudience.MAFIA_ONLY else '☀️'
+                st.markdown(
+                    f'{icon} **[Round-{msg.round} · {msg.phase.value}]** '
+                    f'`{msg.sender_id}`: {msg.content}'
+                )
+            elif kind == 'answer':
+                ans: AgentAnswer = item  # type: ignore[assignment]
+                st.markdown(
+                    f'💬 **[Answer · q:{ans.question_id[:8]}]** '
+                    f'`{ans.agent_id}`: {ans.answer_text}'
+                )
+            elif kind == 'vote':
+                vote: VoteEvent = item  # type: ignore[assignment]
+                st.markdown(
+                    f'🗳️ **[Round-{vote.round} · '
+                    f'{vote.phase.value.replace("_", " ")}]** '
+                    f'`{vote.voter_id}` → `{vote.target_id}`'
+                )
 
 
 def _render_status(
     game_state: GameState | None,
     agents: dict[str, AgentInfo],
 ) -> None:
-    """7.2 — Status panel: phase, round, agent table."""
+    """Status panel: phase, round, agent table."""
     st.subheader('📊 Status')
 
     if game_state is None:
@@ -143,7 +145,7 @@ def _render_status(
     all_ids = game_state.alive_agents + game_state.eliminated
     rows = [
         {
-            'Agent': cache[a].persona_name if a in cache else a,
+            'Ai-player': cache[a].persona_name if a in cache else a,
             'Role': cache[a].role.value if a in cache else '?',
             'Status': '✅' if a in game_state.alive_agents else '💀',
         }
@@ -199,9 +201,9 @@ def _render_host_decision(
     game_state: GameState,
     client: OrchestratorClient,
 ) -> None:
-    """7.3 — Host decision interface, shown only in HOST_DECISION phase."""
+    """Player decision interface, shown only in HOST_DECISION phase."""
     st.divider()
-    st.subheader('⚖️ Host Decision Required')
+    st.subheader('⚖️ Player Decision Required')
     st.warning('Phase: HOST_DECISION — choose an action below.')
 
     col_approve, col_reject, col_override = st.columns(3)
@@ -216,7 +218,7 @@ def _render_host_decision(
             _send_decision(
                 client,
                 HostDecision(action=HostDecisionAction.APPROVE),
-                'Host: APPROVED majority vote',
+                'Player: APPROVED majority vote',
                 'Sent: APPROVE',
             )
 
@@ -225,7 +227,7 @@ def _render_host_decision(
             _send_decision(
                 client,
                 HostDecision(action=HostDecisionAction.REJECT),
-                'Host: REJECTED elimination',
+                'Player: REJECTED elimination',
                 'Sent: REJECT',
             )
 
@@ -234,7 +236,7 @@ def _render_host_decision(
 
 
 def _render_game_control(client: OrchestratorClient) -> None:
-    """7.4 — Game control: start new game + event log."""
+    """Game control: start new game + event log."""
     st.subheader('🎮 Game Control')
     if st.button(
         '🚀 Start New Game',
@@ -259,15 +261,15 @@ def _render_game_control(client: OrchestratorClient) -> None:
 
 
 def _render_ask_agent(client: OrchestratorClient) -> None:
-    """7.5 — Ask agent: form to send a host question to any agent."""
-    st.subheader('❓ Ask Agent')
+    """Ask agent: form to send a host question to any agent."""
+    st.subheader('❓ Ask Ai-player')
     cache: dict[str, AgentInfo] = st.session_state.get('agent_cache', {})
     if not cache:
-        st.info('No agents available. Start a game first.')
+        st.info('No ai-players available. Start a game first.')
         return
 
     options = [f'{a_id} · {info.persona_name}' for a_id, info in cache.items()]
-    selected = st.selectbox('Agent', options, key='ask_agent_sel')
+    selected = st.selectbox('Ai-player', options, key='ask_agent_sel')
     question = st.text_area(
         'Question',
         placeholder='Are you mafia?',
@@ -281,7 +283,7 @@ def _render_ask_agent(client: OrchestratorClient) -> None:
                 q_id = client.ask_agent(agent_id, question.strip())
                 preview = question.strip()[:40]
                 st.session_state['event_log'].append(
-                    f'Host → {agent_id}: "{preview}…" (id: {q_id[:8]})'
+                    f'Player → {agent_id}: "{preview}…" (id: {q_id[:8]})'
                 )
                 st.success('Question sent! Answer will appear in the feed.')
             except OrchestratorClientError as exc:
@@ -302,7 +304,7 @@ def _app() -> None:
         client.get_agents() if game_state and game_state.alive_agents else {}
     )
 
-    st.title('🃏 Mafia-AI — Host Panel')
+    st.title('🃏 Mafia-AI — Game UI')
 
     col_feed, col_status = st.columns([3, 1])
     with col_status:

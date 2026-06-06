@@ -42,4 +42,3 @@ Endpoints
 - [zipkin telemetry](http://localhost:29411)
 - [ui](http://localhost:38501)
 - [Grafana](http://localhost:33000) admin/admin — дашборды Mafia-AI — Log Analytics и Mafia-AI — Service Metrics
-- [Prometheus](http://localhost:39090)
