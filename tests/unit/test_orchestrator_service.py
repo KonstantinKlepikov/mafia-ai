@@ -28,12 +28,11 @@ def _make_settings(**kwargs: object) -> OrchestratorSettings:
         amqp_url='amqp://guest:guest@localhost/',
         vectordb_host='localhost',
         vectordb_port=8000,
+        unified_agent_url='http://unified-agent:8100',
         agent_count=4,
         mafia_count=1,
         phase_duration_seconds=10,
         vote_timeout_seconds=5,
-        agent_http_port=8100,
-        agent_host_pattern='agent-{n}',
     )
     defaults.update(kwargs)
     return OrchestratorSettings(**defaults)  # type: ignore[arg-type]
@@ -90,16 +89,17 @@ def mock_messaging() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_vectordb() -> MagicMock:
-    """Mocked VectorDBClient with 4 personas."""
-    m = MagicMock()
+def mock_database() -> AsyncMock:
+    """Mocked Database with 4 personas."""
+    m = AsyncMock()
     m.list_personas.return_value = [_make_persona(n) for n in range(1, 5)]
+    m.get_persona.return_value = _make_persona(1)
     return m
 
 
 @pytest.fixture
-def mock_poller() -> AsyncMock:
-    """Mocked AgentPoller."""
+def mock_agent_client() -> AsyncMock:
+    """Mocked UnifiedAgentClient."""
     return AsyncMock()
 
 
@@ -107,8 +107,8 @@ def mock_poller() -> AsyncMock:
 def svc(
     settings: OrchestratorSettings,
     mock_messaging: AsyncMock,
-    mock_vectordb: MagicMock,
-    mock_poller: AsyncMock,
+    mock_database: AsyncMock,
+    mock_agent_client: AsyncMock,
     monkeypatch: MonkeyPatch,
 ) -> OrchestratorService:
     """OrchestratorService with all external dependencies mocked."""
@@ -116,9 +116,11 @@ def svc(
         svc_module, 'MessagingClient', MagicMock(return_value=mock_messaging)
     )
     monkeypatch.setattr(
-        svc_module, 'VectorDBClient', MagicMock(return_value=mock_vectordb)
+        svc_module, 'Database', MagicMock(return_value=mock_database)
     )
-    monkeypatch.setattr(svc_module, 'AgentPoller', MagicMock(return_value=mock_poller))
+    monkeypatch.setattr(
+        svc_module, 'UnifiedAgentClient', MagicMock(return_value=mock_agent_client)
+    )
     return OrchestratorService(settings)
 
 
@@ -157,14 +159,14 @@ class TestOrchestratorServiceStart:
 
         mock_messaging.connect.assert_called_once()
 
-    async def test_start_subscribes_to_three_channels(
+    async def test_start_subscribes_to_one_channel(
         self, svc: OrchestratorService, mock_messaging: AsyncMock
     ) -> None:
-        """Test start registers three RabbitMQ subscriptions."""
+        """Test start registers vote RabbitMQ subscription."""
         await svc.start()
 
-        assert mock_messaging.subscribe.call_count == 3, (
-            f'expected 3 subscribe calls, got {mock_messaging.subscribe.call_count}'
+        assert mock_messaging.subscribe.call_count == 1, (
+            f'expected 1 subscribe call, got {mock_messaging.subscribe.call_count}'
         )
 
 
@@ -179,13 +181,13 @@ class TestOrchestratorServiceStop:
 
         mock_messaging.close.assert_called_once()
 
-    async def test_stop_closes_poller(
-        self, svc: OrchestratorService, mock_poller: AsyncMock
+    async def test_stop_closes_agent_client(
+        self, svc: OrchestratorService, mock_agent_client: AsyncMock
     ) -> None:
-        """Test stop calls close on the agent poller."""
+        """Test stop calls close on the agent client."""
         await svc.stop()
 
-        mock_poller.close.assert_called_once()
+        mock_agent_client.close.assert_called_once()
 
     async def test_stop_cancels_active_game_task(
         self, svc: OrchestratorService
@@ -345,78 +347,47 @@ class TestOrchestratorServiceSubscribeMessages:
 class TestOrchestratorServiceGetAgentInfo:
     """Tests for get_agents_info and get_agent_info."""
 
-    async def test_get_agents_info_delegates_to_poller(
-        self, svc: OrchestratorService, mock_poller: AsyncMock
+    async def test_get_agents_info_calls_agent_client(
+        self, svc: OrchestratorService, mock_agent_client: AsyncMock
     ) -> None:
-        """Test get_agents_info calls poll_all with the current alive list."""
+        """Test get_agents_info calls get_state for each alive agent."""
         svc._alive = ['agent-1', 'agent-2']
-        mock_poller.poll_all.return_value = {}
+        mock_agent_client.get_state.return_value = None
 
         await svc.get_agents_info()
 
-        mock_poller.poll_all.assert_called_once_with(['agent-1', 'agent-2'])
+        assert mock_agent_client.get_state.call_count == 2, (
+            f'expected 2 get_state calls, got {mock_agent_client.get_state.call_count}'
+        )
 
-    async def test_get_agent_info_delegates_to_poller(
-        self, svc: OrchestratorService, mock_poller: AsyncMock
+    async def test_get_agent_info_delegates_to_client(
+        self, svc: OrchestratorService, mock_agent_client: AsyncMock
     ) -> None:
-        """Test get_agent_info calls poll_agent with the given agent_id."""
-        mock_poller.poll_agent.return_value = None
+        """Test get_agent_info calls get_state with the given agent_id."""
+        mock_agent_client.get_state.return_value = None
 
         await svc.get_agent_info('agent-3')
 
-        mock_poller.poll_agent.assert_called_once_with('agent-3')
+        mock_agent_client.get_state.assert_called_once_with('agent-3')
 
 
 class TestOrchestratorServiceAskAgent:
     """Tests for OrchestratorService.ask_agent."""
 
-    async def test_publishes_host_question_with_correct_routing_key(
-        self, svc: OrchestratorService, mock_messaging: AsyncMock
+    async def test_calls_answer_question_on_agent_client(
+        self, svc: OrchestratorService, mock_agent_client: AsyncMock
     ) -> None:
-        """Test ask_agent publishes HostQuestion to host.question.{agent_id}."""
-        await svc.ask_agent('agent-2', 'qid-1', 'What did you see?')
+        """Test ask_agent calls answer_question via REST API."""
+        mock_agent_client.answer_question.return_value = 'test answer'
 
-        routing_key = mock_messaging.publish.call_args[0][0]
-        assert routing_key == 'host.question.agent-2', (
-            f'wrong routing key: {routing_key}'
+        result = await svc.ask_agent('agent-2', 'What did you see?')
+
+        mock_agent_client.answer_question.assert_called_once_with(
+            'agent-2', 'What did you see?'
         )
+        assert result == 'test answer', f'wrong answer: {result}'
 
 
-class TestOrchestratorServiceGetAgentAnswer:
-    """Tests for OrchestratorService.get_agent_answer."""
-
-    async def test_returns_cached_answer_and_clears_cache(
-        self, svc: OrchestratorService
-    ) -> None:
-        """Test get_agent_answer returns cached value without blocking."""
-        svc._answer_cache['qid-1'] = 'cached answer'
-
-        result = await svc.get_agent_answer('qid-1', timeout=1.0)
-
-        assert result == 'cached answer', f'expected cached answer, got {result}'
-        assert 'qid-1' not in svc._answer_cache, 'cache must be cleared after pop'
-
-    async def test_waits_for_future_result(self, svc: OrchestratorService) -> None:
-        """Test get_agent_answer blocks until a future is resolved."""
-        qid = 'qid-2'
-
-        async def resolve() -> None:
-            await asyncio.sleep(0)
-            fut = svc._pending_answers.get(qid)
-            if fut and not fut.done():
-                fut.set_result('future answer')
-
-        task = asyncio.create_task(resolve())
-        result = await svc.get_agent_answer(qid, timeout=1.0)
-        await task
-
-        assert result == 'future answer', f'expected future answer, got {result}'
-
-    async def test_returns_none_on_timeout(self, svc: OrchestratorService) -> None:
-        """Test get_agent_answer returns None when no answer arrives in time."""
-        result = await svc.get_agent_answer('qid-missing', timeout=0.01)
-
-        assert result is None, f'expected None on timeout, got {result}'
 
 
 class TestOrchestratorServiceForceStopAgent:
@@ -465,15 +436,15 @@ class TestOrchestratorServiceInitGame:
             f'expected {svc._settings.mafia_count} mafia, got {len(mafia)}'
         )
 
-    async def test_publishes_agent_init_for_each_agent(
-        self, svc: OrchestratorService, mock_messaging: AsyncMock
+    async def test_initializes_all_agents_via_client(
+        self, svc: OrchestratorService, mock_agent_client: AsyncMock
     ) -> None:
-        """Test _init_game publishes an AgentInit message for every agent."""
+        """Test _init_game initializes all agents via REST API."""
         await svc._init_game()
 
-        assert mock_messaging.publish.call_count == svc._settings.agent_count, (
-            f'expected {svc._settings.agent_count} publish calls, '
-            f'got {mock_messaging.publish.call_count}'
+        assert mock_agent_client.initialize_agent.call_count == svc._settings.agent_count, (
+            f'expected {svc._settings.agent_count} initialize_agent calls, '
+            f'got {mock_agent_client.initialize_agent.call_count}'
         )
 
     async def test_sets_game_active(self, svc: OrchestratorService) -> None:
@@ -572,15 +543,15 @@ class TestOrchestratorServiceEliminateAgent:
             f'wrong routing key: {routing_key}'
         )
 
-    async def test_stops_agent_container(
-        self, svc: OrchestratorService, mock_poller: AsyncMock
+    async def test_calls_eliminate_on_agent_client(
+        self, svc: OrchestratorService, mock_agent_client: AsyncMock
     ) -> None:
-        """Test _eliminate_agent calls stop_container on the poller."""
+        """Test _eliminate_agent calls eliminate_agent on the client."""
         svc._alive = ['agent-2']
 
         await svc._eliminate_agent('agent-2')
 
-        mock_poller.stop_container.assert_called_once_with('agent-2')
+        mock_agent_client.eliminate_agent.assert_called_once_with('agent-2')
 
     async def test_skips_agent_not_in_alive(
         self, svc: OrchestratorService, mock_messaging: AsyncMock
@@ -649,50 +620,6 @@ class TestOrchestratorServiceCheckAndHandleWin:
         assert svc._phase != GamePhase.GAME_OVER, 'phase must not be GAME_OVER'
 
 
-class TestOrchestratorServiceOnMessage:
-    """Tests for OrchestratorService._on_message."""
-
-    async def test_appends_message_to_history(self, svc: OrchestratorService) -> None:
-        """Test _on_message stores received message in _messages."""
-        msg = _make_message()
-        body = msg.model_dump_json().encode()
-
-        await svc._on_message('message.agent-1', body)
-
-        assert msg in svc._messages, 'message must be appended to _messages'
-
-    async def test_notifies_sse_queues(self, svc: OrchestratorService) -> None:
-        """Test _on_message puts message into every registered SSE queue."""
-        msg = _make_message()
-        body = msg.model_dump_json().encode()
-        queue: asyncio.Queue[Message] = asyncio.Queue()
-        svc._message_queues.append(queue)
-
-        await svc._on_message('message.agent-1', body)
-
-        assert not queue.empty(), 'SSE queue must receive the message'
-        received = queue.get_nowait()
-        assert received == msg, f'expected {msg}, got {received}'
-
-    async def test_signals_turn_complete_for_sender(
-        self, svc: OrchestratorService
-    ) -> None:
-        """Test _on_message triggers the sender's turn completion event."""
-        event = asyncio.Event()
-        svc._turn_events['agent-1'] = event
-        msg = _make_message(sender_id='agent-1')
-        body = msg.model_dump_json().encode()
-
-        await svc._on_message('message.agent-1', body)
-
-        assert event.is_set(), 'turn event for sender must be set'
-
-    async def test_ignores_invalid_json_body(self, svc: OrchestratorService) -> None:
-        """Test _on_message does not raise on malformed message body."""
-        await svc._on_message('message.agent-1', b'not json')  # must not raise
-        assert svc._messages == [], 'nothing must be added to _messages on error'
-
-
 class TestOrchestratorServiceOnVote:
     """Tests for OrchestratorService._on_vote."""
 
@@ -711,60 +638,6 @@ class TestOrchestratorServiceOnVote:
         """Test _on_vote does not raise on malformed body."""
         await svc._on_vote('vote.agent-1', b'bad data')  # must not raise
         assert svc._vote_queue.empty(), 'nothing must be queued on parse error'
-
-
-class TestOrchestratorServiceOnHostAnswer:
-    """Tests for OrchestratorService._on_host_answer."""
-
-    async def test_resolves_pending_future(self, svc: OrchestratorService) -> None:
-        """Test _on_host_answer sets the result on a waiting future."""
-        loop = asyncio.get_running_loop()
-        fut: asyncio.Future[str] = loop.create_future()
-        svc._pending_answers['qid-7'] = fut
-
-        answer = AgentAnswer(
-            question_id='qid-7', agent_id='agent-1', answer_text='Yes.'
-        )
-        await svc._on_host_answer(
-            'host.answer.qid-7', answer.model_dump_json().encode()
-        )
-
-        assert fut.done(), 'future must be resolved'
-        assert fut.result() == 'Yes.', f'expected "Yes.", got {fut.result()}'
-
-    async def test_caches_answer_when_no_future_waiting(
-        self, svc: OrchestratorService
-    ) -> None:
-        """Test _on_host_answer caches the answer if no future is registered."""
-        answer = AgentAnswer(question_id='qid-8', agent_id='agent-2', answer_text='No.')
-        await svc._on_host_answer(
-            'host.answer.qid-8', answer.model_dump_json().encode()
-        )
-
-        assert svc._answer_cache.get('qid-8') == 'No.', (
-            'answer must be cached when no future is waiting'
-        )
-
-    async def test_ignores_invalid_json_body(self, svc: OrchestratorService) -> None:
-        """Test _on_host_answer does not raise on malformed body."""
-        await svc._on_host_answer('host.answer.x', b'garbage')  # must not raise
-
-
-class TestOrchestratorServiceSignalTurnComplete:
-    """Tests for OrchestratorService._signal_turn_complete."""
-
-    def test_sets_existing_turn_event(self, svc: OrchestratorService) -> None:
-        """Test _signal_turn_complete sets the event for the given agent."""
-        event = asyncio.Event()
-        svc._turn_events['agent-3'] = event
-
-        svc._signal_turn_complete('agent-3')
-
-        assert event.is_set(), 'turn event must be set for agent-3'
-
-    def test_noop_when_no_event_registered(self, svc: OrchestratorService) -> None:
-        """Test _signal_turn_complete does not raise if agent has no turn event."""
-        svc._signal_turn_complete('agent-99')  # must not raise
 
 
 class TestOrchestratorServiceDrainVoteQueue:
@@ -859,77 +732,3 @@ class TestOrchestratorServiceMafiaAlive:
         result = svc._mafia_alive()
 
         assert result == [], f'expected empty list, got {result}'
-
-
-class TestOrchestratorServiceRunSpeakPhase:
-    """Tests for OrchestratorService._run_speak_phase."""
-
-    async def test_publishes_turn_signal_for_each_alive_agent(
-        self, svc: OrchestratorService
-    ) -> None:
-        """Test _run_speak_phase publishes one TurnSignal per alive agent."""
-        svc._alive = ['agent-1', 'agent-2']
-        svc._roles = {
-            'agent-1': AgentRole.CITIZEN,
-            'agent-2': AgentRole.CITIZEN,
-        }
-        svc._phase = GamePhase.DAY
-        svc._round = 1
-
-        async def mock_publish(routing_key: str, *args: object) -> None:
-            if routing_key.startswith('game.turn.'):
-                agent_id = routing_key.split('.')[-1]
-                ev = svc._turn_events.get(agent_id)
-                if ev:
-                    ev.set()
-
-        svc._messaging.publish.side_effect = mock_publish  # type: ignore[attr-defined]
-
-        await svc._run_speak_phase(mafia_only=False)
-
-        assert svc._messaging.publish.call_count == 2, (  # type: ignore[attr-defined]
-            'expected 2 turn signals'
-        )
-
-    async def test_sends_turn_signal_only_to_mafia_when_mafia_only(
-        self, svc: OrchestratorService
-    ) -> None:
-        """Test _run_speak_phase sends signals only to mafia during night phase."""
-        svc._alive = ['agent-1', 'agent-2', 'agent-3']
-        svc._roles = {
-            'agent-1': AgentRole.MAFIA,
-            'agent-2': AgentRole.CITIZEN,
-            'agent-3': AgentRole.CITIZEN,
-        }
-        svc._phase = GamePhase.NIGHT
-        svc._round = 1
-        published: list[str] = []
-
-        async def mock_publish(routing_key: str, *args: object) -> None:
-            published.append(routing_key)
-            if routing_key.startswith('game.turn.'):
-                agent_id = routing_key.split('.')[-1]
-                ev = svc._turn_events.get(agent_id)
-                if ev:
-                    ev.set()
-
-        svc._messaging.publish.side_effect = mock_publish  # type: ignore[attr-defined]
-
-        await svc._run_speak_phase(mafia_only=True)
-
-        turn_keys = [k for k in published if k.startswith('game.turn.')]
-        assert len(turn_keys) == 1, (
-            f'only mafia agent must get a turn signal, got {turn_keys}'
-        )
-        assert 'game.turn.agent-1' in turn_keys, (
-            f'mafia agent-1 must receive the turn signal, got {turn_keys}'
-        )
-
-    async def test_skips_when_no_targets(self, svc: OrchestratorService) -> None:
-        """Test _run_speak_phase does nothing when target list is empty."""
-        svc._alive = []
-        svc._roles = {}
-
-        await svc._run_speak_phase(mafia_only=False)
-
-        svc._messaging.publish.assert_not_called()  # type: ignore[attr-defined]

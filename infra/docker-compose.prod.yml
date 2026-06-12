@@ -93,13 +93,11 @@ services:
     env_file:
       - .env
     ports:
-      - "38082:8082"
+      - "38100:8100"
     environment:
       - LLM_URL=${LLM_URL?Variable not set}
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
-      - MESSAGE_MAX_TOKENS=${MESSAGE_MAX_TOKENS?Variable not set}
-      - VOTE_MAX_TOKENS=${VOTE_MAX_TOKENS?Variable not set}
     networks:
       - game_net
     depends_on:
@@ -123,7 +121,7 @@ services:
       - "38081:8081"
     environment:
       - AMQP_URL=${AMQP_URL?Variable not set}
-      - UNIFIED_AGENT_URL=${UNIFIED_AGENT_URL?Variable not set}
+      - UNIFIED_AGENT_URL=http://mafia-ai-unified-agent:8100
       - AGENT_COUNT=${AGENT_COUNT?Variable not set}
       - MAFIA_COUNT=${MAFIA_COUNT?Variable not set}
       - PHASE_DURATION_SECONDS=${PHASE_DURATION_SECONDS?Variable not set}

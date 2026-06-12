@@ -1,0 +1,388 @@
+x-agent-base: &agent-base
+  env_file:
+    - .env
+  build:
+    context: ..
+    dockerfile: infra/agent/Dockerfile
+  networks:
+    - game_net
+  healthcheck:
+    test: ["CMD", "curl", "-sf", "http://localhost:8100/agent/info"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 15s
+  depends_on:
+    mafia-ai-rabbitmq:
+      condition: service_healthy
+    mafia-ai-llm:
+      condition: service_healthy
+    mafia-ai-vectordb-seed:
+      condition: service_completed_successfully
+
+x-agent-env: &agent-env
+  AGENT_HTTP_PORT: ${AGENT_HTTP_PORT?Variable not set}
+  AMQP_URL: ${AMQP_URL?Variable not set}
+  LLM_URL: ${LLM_URL?Variable not set}
+  VECTORDB_HOST: ${VECTORDB_HOST?Variable not set}
+  MESSAGE_MAX_TOKENS: ${MESSAGE_MAX_TOKENS?Variable not set}
+  VOTE_MAX_TOKENS: ${VOTE_MAX_TOKENS?Variable not set}
+  OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED?Variable not set}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
+
+services:
+  mafia-ai-rabbitmq:
+    image: rabbitmq:4.3-management-alpine
+    env_file:
+      - .env
+    ports:
+      - "35672:5672"
+      - "35673:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER?Variable not set}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS?Variable not set}
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/10-mafia.conf
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mafia-ai-otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ${PWD}/infra/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    networks:
+      - game_net
+
+  mafia-ai-zipkin:
+    image: openzipkin/zipkin
+    ports:
+      - "29411:9411"
+    depends_on: [mafia-ai-otel-collector]
+    networks:
+      - game_net
+
+  mafia-ai-vectordb:
+    image: chromadb/chroma
+    volumes:
+      - chroma_data:/data
+    ports:
+      - "36333:8000"
+    networks:
+      - game_net
+    environment:
+      - CHROMA_OPEN_TELEMETRY__ENDPOINT=${CHROMA_OPEN_TELEMETRY__ENDPOINT?Variable not set}
+      - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=${CHROMA_OPEN_TELEMETRY__SERVICE_NAME?Variable not set}
+    depends_on:
+      - mafia-ai-otel-collector
+      - mafia-ai-zipkin
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+    #   interval: 15s
+    #   timeout: 5s
+    #   retries: 3
+
+  mafia-ai-ollama:
+    env_file:
+      - .env
+    build:
+      context: ./ollama
+      dockerfile: Dockerfile
+    ports:
+      - "31434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  mafia-ai-llm:
+    env_file:
+      - .env
+    build:
+      context: ..
+      dockerfile: infra/llm/Dockerfile
+    ports:
+      - "38080:8080"
+    environment:
+      - OLLAMA_URL=${OLLAMA_URL?Variable not set}
+      - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
+      - LLM_QUEUE_MAX_SIZE=${LLM_QUEUE_MAX_SIZE?Variable not set}
+      - SERVICENAME=${SERVICENAME?Variable not set}
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
+    depends_on:
+      mafia-ai-ollama:
+        condition: service_healthy
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mafia-ai-vectordb-seed:
+    build:
+      context: ..
+      dockerfile: infra/vectordb/Dockerfile
+    depends_on:
+      mafia-ai-vectordb:
+        condition: service_started
+    networks:
+      - game_net
+    restart: "no"
+
+  mafia-ai-orchestrator:
+    build:
+      context: ..
+      dockerfile: infra/orchestrator/Dockerfile
+    container_name: mafia-ai-orchestrator
+    env_file:
+      - .env
+    ports:
+      - "38081:8081"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - game_net
+    depends_on:
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+      mafia-ai-vectordb-seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/game/state"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  mafia-ai-admin:
+    build:
+      context: ..
+      dockerfile: infra/admin/Dockerfile
+    container_name: mafia-ai-admin
+    env_file:
+      - .env
+    environment:
+      - ORCHESTRATOR_URL=${ORCHESTRATOR_URL?Variable not set}
+    ports:
+      - "38501:8501"
+    networks:
+      - game_net
+    depends_on:
+      mafia-ai-orchestrator:
+        condition: service_healthy
+      mafia-ai-rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8501/_stcore/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mafia-ai-agent-1:
+    <<: *agent-base
+    container_name: mafia-ai-agent-1
+    ports:
+      - "38101:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-1
+      PERSONA_ID: persona_1_good_natured
+
+  mafia-ai-agent-2:
+    <<: *agent-base
+    container_name: mafia-ai-agent-2
+    ports:
+      - "38102:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-2
+      PERSONA_ID: persona_2_hysteric
+
+  mafia-ai-agent-3:
+    <<: *agent-base
+    container_name: mafia-ai-agent-3
+    ports:
+      - "38103:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-3
+      PERSONA_ID: persona_3_conspiracy_theorist
+
+  mafia-ai-agent-4:
+    <<: *agent-base
+    container_name: mafia-ai-agent-4
+    ports:
+      - "38104:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-4
+      PERSONA_ID: persona_4_aristocrat
+
+  mafia-ai-agent-5:
+    <<: *agent-base
+    container_name: mafia-ai-agent-5
+    ports:
+      - "38105:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-5
+      PERSONA_ID: persona_5_housewife
+
+  mafia-ai-agent-6:
+    <<: *agent-base
+    container_name: mafia-ai-agent-6
+    ports:
+      - "38106:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-6
+      PERSONA_ID: persona_6_seductress
+
+  mafia-ai-agent-7:
+    <<: *agent-base
+    container_name: mafia-ai-agent-7
+    ports:
+      - "38107:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-7
+      PERSONA_ID: persona_7_neurasthenic
+
+  mafia-ai-agent-8:
+    <<: *agent-base
+    container_name: mafia-ai-agent-8
+    ports:
+      - "38108:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-8
+      PERSONA_ID: persona_8_clericalist
+
+  mafia-ai-agent-9:
+    <<: *agent-base
+    container_name: mafia-ai-agent-9
+    ports:
+      - "38109:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-9
+      PERSONA_ID: persona_9_poetess
+
+  mafia-ai-agent-10:
+    <<: *agent-base
+    container_name: mafia-ai-agent-10
+    ports:
+      - "38110:8100"
+    environment:
+      <<: *agent-env
+      AGENT_ID: agent-10
+      PERSONA_ID: persona_10_simpleton
+
+  mafia-ai-loki:
+    image: grafana/loki:3.5.0
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ${PWD}/infra/loki/loki-config.yaml:/etc/loki/loki-config.yaml
+      - loki_data:/loki
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=-", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  mafia-ai-promtail:
+    image: grafana/promtail:3.5.0
+    command: ["-config.file=/etc/promtail/promtail-config.yaml"]
+    volumes:
+      - ${PWD}/infra/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - game_net
+    depends_on:
+      mafia-ai-loki:
+        condition: service_healthy
+
+  mafia-ai-prometheus:
+    image: prom/prometheus:v3.0.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ${PWD}/infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "39090:9090"
+    networks:
+      - game_net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mafia-ai-grafana:
+    image: grafana/grafana:11.6.0
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER?Variable not set}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD?Variable not set}
+      - GF_AUTH_ANONYMOUS_ENABLED=${GF_AUTH_ANONYMOUS_ENABLED?Variable not set}
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=${GF_AUTH_ANONYMOUS_ORG_ROLE?Variable not set}
+      - GF_USERS_DEFAULT_THEME=${GF_USERS_DEFAULT_THEME?Variable not set}
+    volumes:
+      - ${PWD}/infra/grafana/provisioning:/etc/grafana/provisioning
+      - ${PWD}/infra/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "33000:3000"
+    networks:
+      - game_net
+    depends_on:
+      mafia-ai-loki:
+        condition: service_healthy
+      mafia-ai-prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=-", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  game_net:
+    driver: bridge
+
+volumes:
+  ollama_data:
+  chroma_data:
+  loki_data:
+  prometheus_data:
+  grafana_data:

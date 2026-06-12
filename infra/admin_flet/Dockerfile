@@ -14,13 +14,13 @@ COPY pyproject.toml poetry.lock poetry.toml ./
 RUN POETRY_VIRTUALENVS_CREATE=false poetry install --no-root
 
 COPY src/shared ./shared
-COPY src/services/orchestrator ./orchestrator
+COPY src/services/admin_flet ./admin_flet
 
 ENV PYTHONPATH=/app
 
-EXPOSE 8081
+EXPOSE 8550
 
-COPY infra/orchestrator/entrypoint.sh /entrypoint.sh
+COPY infra/admin_flet/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

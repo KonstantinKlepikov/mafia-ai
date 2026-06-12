@@ -3,6 +3,8 @@
 Expose common Pydantic models used across services.
 """
 
+from .database import Database
+from .messaging import MessagingClient
 from .models import (
     AgentRole,
     AgentState,
@@ -13,18 +15,16 @@ from .models import (
     TargetAudience,
     VoteEvent,
 )
-from .vectordb_client import VectorDBClient
-from .messaging import MessagingClient
 
 __all__ = [
     'AgentRole',
-    'GamePhase',
-    'TargetAudience',
-    'Message',
-    'VoteEvent',
-    'GameState',
     'AgentState',
-    'SystemPrompt',
-    'VectorDBClient',
+    'Database',
+    'GamePhase',
+    'GameState',
+    'Message',
     'MessagingClient',
+    'SystemPrompt',
+    'TargetAudience',
+    'VoteEvent',
 ]

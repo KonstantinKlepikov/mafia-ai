@@ -1,0 +1,241 @@
+"""Unit tests for LLM Pool optimization modules."""
+
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from services.llm.core.pool import ModelPool
+from services.llm.core.resource_detection import (
+    HardwareInfo,
+    calculate_pool_size,
+    detect_hardware,
+)
+from services.llm.schemas.llm_schemas import (
+    GenerateRequest,
+    GenerateResponse,
+    MessageItem,
+    Usage,
+)
+
+
+class TestResourceDetection:
+    """Test hardware resource detection."""
+
+    def test_calculate_pool_size_gpu_large_model(self) -> None:
+        """Test pool size calculation for large model on GPU."""
+        hardware = HardwareInfo(
+            has_cuda=True,
+            gpu_count=2,
+            total_vram_mb=80 * 1024,  # 80GB total
+            cpu_cores=16,
+            total_ram_mb=64 * 1024,
+        )
+
+        # Large model (70b) needs ~40GB VRAM per instance
+        pool_size = calculate_pool_size(hardware, 'llama3.1:70b')
+
+        # 80GB * 0.8 = 64GB usable, 64GB / 40GB = 1.6 → 1 instance
+        assert pool_size == 1
+
+    def test_calculate_pool_size_gpu_small_model(self) -> None:
+        """Test pool size calculation for small model on GPU."""
+        hardware = HardwareInfo(
+            has_cuda=True,
+            gpu_count=1,
+            total_vram_mb=24 * 1024,  # 24GB
+            cpu_cores=8,
+            total_ram_mb=32 * 1024,
+        )
+
+        # Small model (8b) needs ~4GB VRAM per instance
+        pool_size = calculate_pool_size(hardware, 'llama3.1:8b')
+
+        # 24GB * 0.8 = 19.2GB usable, 19.2GB / 4GB = 4.8 → 4 instances
+        assert pool_size == 4
+
+    def test_calculate_pool_size_cpu_mode(self) -> None:
+        """Test pool size calculation for CPU mode."""
+        hardware = HardwareInfo(
+            has_cuda=False,
+            gpu_count=0,
+            total_vram_mb=0,
+            cpu_cores=8,
+            total_ram_mb=16 * 1024,  # 16GB
+        )
+
+        # Small model on CPU needs ~2GB RAM per instance
+        pool_size = calculate_pool_size(hardware, 'llama3.1:8b')
+
+        # 16GB * 0.6 = 9.6GB usable, 9.6GB / 2GB = 4.8 → 4 instances
+        # But capped by CPU cores (8), so 4 instances
+        assert pool_size == 4
+
+    def test_calculate_pool_size_max_cap(self) -> None:
+        """Test pool size capped at maximum (8 instances)."""
+        hardware = HardwareInfo(
+            has_cuda=True,
+            gpu_count=4,
+            total_vram_mb=200 * 1024,  # 200GB (unrealistic but for test)
+            cpu_cores=64,
+            total_ram_mb=256 * 1024,
+        )
+
+        # Small model: 200GB * 0.8 / 4GB = 40 instances → capped to 8
+        pool_size = calculate_pool_size(hardware, 'llama3.1:8b')
+
+        assert pool_size == 8
+
+    @patch('services.llm.core.resource_detection.subprocess.run')
+    @patch('services.llm.core.resource_detection.os.cpu_count')
+    @patch('services.llm.core.resource_detection.platform.system')
+    def test_detect_hardware_with_gpu(
+        self,
+        mock_platform: Mock,
+        mock_cpu_count: Mock,
+        mock_subprocess_run: Mock,
+    ) -> None:
+        """Test hardware detection with NVIDIA GPU."""
+        mock_platform.return_value = 'Linux'
+        mock_cpu_count.return_value = 16
+
+        # Mock nvidia-smi output (2 GPUs with 24GB each)
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = '24576\n24576\n'
+        mock_subprocess_run.return_value = mock_result
+
+        # Mock /proc/meminfo using unittest.mock.mock_open
+        from unittest.mock import mock_open as mock_open_func
+
+        meminfo_content = 'MemTotal:       65536000 kB\n'
+        with patch('builtins.open', mock_open_func(read_data=meminfo_content)):
+            hardware = detect_hardware()
+
+        assert hardware.has_cuda is True
+        assert hardware.gpu_count == 2
+        assert hardware.total_vram_mb == 49152  # 24576 * 2
+        assert hardware.cpu_cores == 16
+        assert hardware.total_ram_mb == 64000  # 65536000 // 1024
+
+    @patch('services.llm.core.resource_detection.subprocess.run')
+    @patch('services.llm.core.resource_detection.os.cpu_count')
+    @patch('services.llm.core.resource_detection.platform.system')
+    def test_detect_hardware_without_gpu(
+        self,
+        mock_platform: Mock,
+        mock_cpu_count: Mock,
+        mock_subprocess_run: Mock,
+    ) -> None:
+        """Test hardware detection without GPU."""
+        mock_platform.return_value = 'Linux'
+        mock_cpu_count.return_value = 8
+
+        # Mock nvidia-smi not found
+        mock_subprocess_run.side_effect = FileNotFoundError()
+
+        # Mock /proc/meminfo
+        from unittest.mock import mock_open as mock_open_func
+
+        meminfo_content = 'MemTotal:       16384000 kB\n'
+        with patch('builtins.open', mock_open_func(read_data=meminfo_content)):
+            hardware = detect_hardware()
+
+        assert hardware.has_cuda is False
+        assert hardware.gpu_count == 0
+        assert hardware.total_vram_mb == 0
+        assert hardware.cpu_cores == 8
+        assert hardware.total_ram_mb == 16000
+
+
+class TestModelPool:
+    """Test ModelPool class."""
+
+    @pytest.mark.asyncio
+    async def test_model_pool_generate(self) -> None:
+        """Test basic generation through model pool."""
+        pool = ModelPool(
+            ollama_url='http://localhost:11434',
+            model_name='llama3.1:8b',
+            pool_size=2,
+        )
+
+        # Mock Ollama client
+        mock_response = Mock()
+        mock_response.message.content = 'Hello from LLM!'
+        mock_response.prompt_eval_count = 10
+        mock_response.eval_count = 5
+
+        mock_chat = AsyncMock(return_value=mock_response)
+        for client in pool._clients:
+            client.chat = mock_chat
+
+        request = GenerateRequest(
+            system_prompt='You are a helpful assistant.',
+            messages=[MessageItem(role='user', content='Hello!')],
+            max_tokens=100,
+        )
+
+        response = await pool.generate(request)
+
+        assert response.text == 'Hello from LLM!'
+        assert response.usage.prompt_tokens == 10
+        assert response.usage.completion_tokens == 5
+        assert response.usage.total_tokens == 15
+        mock_chat.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_model_pool_round_robin(self) -> None:
+        """Test round-robin client selection."""
+        pool = ModelPool(
+            ollama_url='http://localhost:11434',
+            model_name='llama3.1:8b',
+            pool_size=3,
+        )
+
+        # Pick clients and verify round-robin
+        client1 = await pool._pick_client()
+        client2 = await pool._pick_client()
+        client3 = await pool._pick_client()
+        client4 = await pool._pick_client()  # Should wrap to first
+
+        assert client1 is pool._clients[0]
+        assert client2 is pool._clients[1]
+        assert client3 is pool._clients[2]
+        assert client4 is pool._clients[0]  # Wrapped around
+
+    @pytest.mark.asyncio
+    async def test_model_pool_concurrency_limit(self) -> None:
+        """Test that pool limits concurrent requests to pool_size."""
+        pool_size = 2
+        pool = ModelPool(
+            ollama_url='http://localhost:11434',
+            model_name='llama3.1:8b',
+            pool_size=pool_size,
+        )
+
+        # Mock slow Ollama call
+        async def slow_chat(*args, **kwargs):
+            await asyncio.sleep(0.1)
+            mock_response = Mock()
+            mock_response.message.content = 'Response'
+            mock_response.prompt_eval_count = 10
+            mock_response.eval_count = 5
+            return mock_response
+
+        for client in pool._clients:
+            client.chat = slow_chat
+
+        request = GenerateRequest(
+            system_prompt='Test',
+            messages=[MessageItem(role='user', content='Hello')],
+            max_tokens=50,
+        )
+
+        # Launch 4 requests concurrently
+        import asyncio
+        tasks = [pool.generate(request) for _ in range(4)]
+        responses = await asyncio.gather(*tasks)
+
+        # All should complete successfully
+        assert len(responses) == 4
+        assert all(r.text == 'Response' for r in responses)

@@ -39,7 +39,6 @@ select = ["I"]
 - Names must be ASCII English only
 - Never use `l`, `O`, `I` as single-char name of variable, class, method or constant
 - Prefix `_` = private (`_type`); suffix `_` = avoid keyword clash (`type_`)
-- Never use double prefix `__`
 
 ## Type hints
 

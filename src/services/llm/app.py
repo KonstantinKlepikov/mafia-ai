@@ -19,9 +19,10 @@ configure_loguru(_SERVICE_NAME)
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[dict[str, LLMService], None]:
-    service = LLMService(queue_max_size=settings.llm_queue_max_size)
+    pool_size = settings.llm_pool_size if settings.llm_pool_size > 0 else None
+    service = LLMService(pool_size=pool_size)
     await service.start()
-    logger.info('LLMService starts!')
+    logger.info('LLMService started with ModelPool!')
     try:
         yield {'service': service}
     finally:

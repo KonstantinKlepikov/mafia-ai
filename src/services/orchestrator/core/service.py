@@ -5,24 +5,23 @@ from collections.abc import AsyncGenerator
 
 from loguru import logger
 
+from shared.database import Database
 from shared.messaging import MessagingClient
 from shared.models import (
     AgentInfo,
-    AgentInit,
     AgentRole,
+    AgentState,
+    AgentStatus,
     GamePhase,
     GameState,
     HostDecision,
     HostDecisionAction,
-    HostQuestion,
     Message,
-    TurnSignal,
     VoteEvent,
 )
-from shared.vectordb_client import VectorDBClient
 
 from ..config import OrchestratorSettings
-from .agent_poller import AgentEndpoint, AgentPoller
+from .unified_agent_client import UnifiedAgentClient
 from .vote_resolver import resolve_votes
 
 
@@ -30,8 +29,7 @@ class OrchestratorService:
     """Game orchestrator: manages phases, agents, votes, and host interaction.
 
     Runs an asyncio game loop as a background task once a game is started.
-    Coordinates agent messaging via RabbitMQ and exposes state to the FastAPI
-    REST layer.
+    Uses unified agent service REST API for agent coordination.
 
     The FSM cycle per round:
     NIGHT → NIGHT_VOTE → RESOLVE_NIGHT → DAY → DAY_VOTE → HOST_DECISION
@@ -45,8 +43,8 @@ class OrchestratorService:
     def __init__(self, settings: OrchestratorSettings) -> None:
         self._settings = settings
         self._messaging = MessagingClient(settings.amqp_url)
-        self._vectordb = VectorDBClient(settings.vectordb_host, settings.vectordb_port)
-        self._poller = AgentPoller(self._build_endpoints(), settings.docker_socket_url)
+        self._db = Database()
+        self._agent_client = UnifiedAgentClient(settings.unified_agent_url)
 
         # Game state
         self._round: int = 0
@@ -66,13 +64,6 @@ class OrchestratorService:
         self._host_decision: HostDecision | None = None
         self._host_decision_event: asyncio.Event = asyncio.Event()
 
-        # Agent answer futures keyed by question_id
-        self._pending_answers: dict[str, asyncio.Future[str]] = {}
-        self._answer_cache: dict[str, str] = {}
-
-        # Per-agent turn completion events
-        self._turn_events: dict[str, asyncio.Event] = {}
-
         # Background game task
         self._game_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._game_active: bool = False
@@ -82,11 +73,11 @@ class OrchestratorService:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Connect to RabbitMQ and subscribe to all game channels."""
+        """Connect to RabbitMQ, Database and subscribe to all game channels."""
+        await self._db.connect()
+        await self._db.init_from_yaml('config/prompts.yaml')
         await self._messaging.connect()
-        await self._messaging.subscribe('message.*', self._on_message)
         await self._messaging.subscribe('vote.*', self._on_vote)
-        await self._messaging.subscribe('host.answer.*', self._on_host_answer)
         logger.info('OrchestratorService started')
 
     async def stop(self) -> None:
@@ -94,7 +85,8 @@ class OrchestratorService:
         if self._game_task is not None and not self._game_task.done():
             self._game_task.cancel()
         await self._messaging.close()
-        await self._poller.close()
+        await self._agent_client.close()
+        await self._db.close()
         logger.info('OrchestratorService stopped')
 
     # ------------------------------------------------------------------
@@ -153,73 +145,101 @@ class OrchestratorService:
             self._message_queues.remove(queue)
 
     async def get_agents_info(self) -> dict[str, AgentInfo]:
-        """Poll all alive agents concurrently and return their info.
+        """Get info for all alive agents concurrently.
 
         Returns:
-            Mapping of agent_id to AgentInfo.
+            Mapping of agent_id to AgentInfo with display fields.
 
         """
-        return await self._poller.poll_all(self._alive)
+        tasks = {
+            agent_id: self._agent_client.get_state(agent_id)
+            for agent_id in self._alive
+        }
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+        infos = {}
+        for agent_id, result in zip(tasks.keys(), results):
+            if isinstance(result, AgentState):
+                persona_name = 'Unknown'
+                if result.persona_id:
+                    try:
+                        persona = await self._db.get_persona(result.persona_id)
+                        persona_name = persona.name
+                    except Exception:
+                        pass
+
+                status = (
+                    AgentStatus.ALIVE
+                    if agent_id in self._alive
+                    else AgentStatus.ELIMINATED
+                )
+                infos[agent_id] = AgentInfo(
+                    agent_id=agent_id,
+                    persona_name=persona_name,
+                    role=result.role,
+                    status=status,
+                    container_id=None,
+                )
+        return infos
 
     async def get_agent_info(self, agent_id: str) -> AgentInfo | None:
-        """Poll a single agent and return its info.
+        """Get info for a single agent.
 
         Args:
-            agent_id: ID of the agent to poll.
+            agent_id: ID of the agent to query.
 
         Returns:
             AgentInfo on success, or None if unreachable / unknown.
 
         """
-        return await self._poller.poll_agent(agent_id)
+        state = await self._agent_client.get_state(agent_id)
+        if state is None:
+            return None
+
+        persona_name = 'Unknown'
+        if state.persona_id:
+            try:
+                persona = await self._db.get_persona(state.persona_id)
+                persona_name = persona.name
+            except Exception:
+                pass
+
+        status = (
+            AgentStatus.ALIVE
+            if agent_id in self._alive
+            else AgentStatus.ELIMINATED
+        )
+        return AgentInfo(
+            agent_id=agent_id,
+            persona_name=persona_name,
+            role=state.role,
+            status=status,
+            container_id=None,
+        )
 
     async def ask_agent(
-        self, agent_id: str, question_id: str, question_text: str
-    ) -> None:
-        """Publish a HostQuestion to the target agent via RabbitMQ.
+        self, agent_id: str, question_text: str, timeout: float = 60.0
+    ) -> str | None:
+        """Ask agent a question via REST API and return the answer.
 
         Args:
             agent_id: ID of the agent to ask.
-            question_id: Unique UUID for this question.
             question_text: Question text from the host.
-
-        """
-        question = HostQuestion(
-            question_id=question_id,
-            target_agent_id=agent_id,
-            question_text=question_text,
-        )
-        await self._messaging.publish(f'host.question.{agent_id}', question)
-
-    async def get_agent_answer(
-        self, question_id: str, timeout: float = 60.0
-    ) -> str | None:
-        """Wait for an agent's answer to a previously asked question.
-
-        Checks the answer cache first; if not yet received, blocks until the
-        answer arrives or the timeout expires.
-
-        Args:
-            question_id: UUID of the question to wait for.
-            timeout: Maximum seconds to wait.
+            timeout: Maximum seconds to wait for answer.
 
         Returns:
-            Answer text, or None if timed out.
+            Answer text, or None if request fails or times out.
 
         """
-        cached = self._answer_cache.pop(question_id, None)
-        if cached is not None:
-            return cached
-
-        loop = asyncio.get_running_loop()
-        fut: asyncio.Future[str] = loop.create_future()
-        self._pending_answers[question_id] = fut
         try:
-            return await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
-        except asyncio.TimeoutError:
+            answer = await asyncio.wait_for(
+                self._agent_client.answer_question(agent_id, question_text),
+                timeout=timeout,
+            )
+            return answer
+        except (asyncio.TimeoutError, Exception) as exc:
+            logger.warning(f'Failed to get answer from {agent_id}: {exc}')
             return None
-        finally:
-            self._pending_answers.pop(question_id, None)
 
     async def force_stop_agent(self, agent_id: str) -> None:
         """Force-eliminate an agent and stop its container.
@@ -245,8 +265,8 @@ class OrchestratorService:
             for aid in all_agent_ids
         }
 
-        # Assign personas from VectorDB (unique when possible)
-        personas = self._vectordb.list_personas()
+        # Assign personas from Database (unique when possible)
+        personas = await self._db.list_personas()
         if len(personas) >= self._settings.agent_count:
             sampled = random.sample(personas, self._settings.agent_count)
         else:
@@ -264,15 +284,15 @@ class OrchestratorService:
         self._game_active = True
         self._host_decision = None
         self._host_decision_event.clear()
-        self._answer_cache.clear()
         self._drain_vote_queue()
 
-        # Publish personalised role assignment to each agent
+        # Initialize agents via unified agent service REST API
         for aid in all_agent_ids:
-            init_msg = AgentInit(agent_id=aid, role=self._roles[aid])
-            await self._messaging.publish(f'game.init.{aid}', init_msg)
+            await self._agent_client.initialize_agent(
+                aid, self._roles[aid], persona_map[aid]
+            )
             logger.info(
-                f'Assigned role {self._roles[aid]} to {aid} '
+                f'Initialized {aid} with role {self._roles[aid]} '
                 f'(persona {persona_map[aid]})'
             )
 
@@ -336,13 +356,13 @@ class OrchestratorService:
             logger.info('Game loop ended')
 
     async def _run_speak_phase(self, mafia_only: bool) -> None:
-        """Send turn signals sequentially during NIGHT or DAY speaking phase.
+        """Request agents to generate messages during NIGHT or DAY speaking phase.
 
-        Each agent gets a time slice; if no message arrives within the slice the
+        Each agent gets a time slice; if generation fails within the slice the
         orchestrator moves on (timeout not fatal).
 
         Args:
-            mafia_only: When True only mafia agents receive a turn signal.
+            mafia_only: When True only mafia agents generate messages.
 
         """
         targets = self._mafia_alive() if mafia_only else list(self._alive)
@@ -357,25 +377,41 @@ class OrchestratorService:
             if agent_id not in self._alive:
                 continue
 
-            event = asyncio.Event()
-            self._turn_events[agent_id] = event
-
-            signal = TurnSignal(
-                agent_id=agent_id,
-                phase=self._phase,
-                round=self._round,
-            )
-            await self._messaging.publish(f'game.turn.{agent_id}', signal)
-
             try:
-                await asyncio.wait_for(event.wait(), timeout=per_agent_timeout)
+                message_text = await asyncio.wait_for(
+                    self._agent_client.generate_message(
+                        agent_id, self._phase.value, self._round
+                    ),
+                    timeout=per_agent_timeout,
+                )
+
+                # Store message in history
+                message = Message(
+                    sender_id=agent_id,
+                    agent_id=agent_id,
+                    round=self._round,
+                    phase=self._phase,
+                    content=message_text,
+                )
+                self._messages.append(message)
+
+                # Notify SSE subscribers
+                for queue in self._message_queues:
+                    await queue.put(message)
+
+                logger.info(
+                    f'Agent {agent_id} spoke in {self._phase} round {self._round}'
+                )
+
             except asyncio.TimeoutError:
                 logger.warning(
                     f'Agent {agent_id} did not respond within '
                     f'{per_agent_timeout:.1f}s; moving on'
                 )
-            finally:
-                self._turn_events.pop(agent_id, None)
+            except Exception as exc:
+                logger.error(
+                    f'Agent {agent_id} message generation failed: {exc}'
+                )
 
     async def _collect_votes(self, expected: int, suffix: str) -> list[VoteEvent]:
         """Collect votes from the queue until expected count or timeout.
@@ -445,7 +481,7 @@ class OrchestratorService:
         raise ValueError(f'Unknown decision action: {decision.action}')
 
     async def _eliminate_agent(self, agent_id: str) -> None:
-        """Remove agent from alive list, publish state, and stop its container.
+        """Remove agent from alive list, publish state, and eliminate via API.
 
         Args:
             agent_id: ID of the agent to eliminate.
@@ -466,7 +502,7 @@ class OrchestratorService:
         await self._messaging.publish(
             f'game.state.eliminated.{agent_id}', elimination_state
         )
-        await self._poller.stop_container(agent_id)
+        await self._agent_client.eliminate_agent(agent_id)
         logger.info(f'Agent {agent_id} eliminated')
 
     def _check_and_handle_win(self) -> bool:
@@ -523,22 +559,6 @@ class OrchestratorService:
         )
         await self._messaging.publish('game.state', state)
 
-    def _build_endpoints(self) -> list[AgentEndpoint]:
-        """Build the AgentEndpoint list from settings."""
-        endpoints = []
-        for n in range(1, self._settings.agent_count + 1):
-            agent_id = f'agent-{n}'
-            host = self._settings.agent_host_pattern.format(n=n)
-            endpoints.append(
-                AgentEndpoint(
-                    agent_id=agent_id,
-                    host=host,
-                    port=self._settings.agent_http_port,
-                    container_name=host,
-                )
-            )
-        return endpoints
-
     def _drain_vote_queue(self) -> None:
         """Discard any votes left in the queue from previous phases."""
         drained = 0
@@ -555,19 +575,6 @@ class OrchestratorService:
     # RabbitMQ callbacks
     # ------------------------------------------------------------------
 
-    async def _on_message(self, routing_key: str, body: bytes) -> None:
-        """Store game messages, notify SSE subscribers and signal turn complete."""
-        try:
-            msg = Message.model_validate(json.loads(body))
-        except Exception as exc:
-            logger.error(f'Failed to parse message ({routing_key}): {exc}')
-            return
-
-        self._messages.append(msg)
-        for queue in self._message_queues:
-            queue.put_nowait(msg)
-        self._signal_turn_complete(msg.sender_id)
-
     async def _on_vote(self, routing_key: str, body: bytes) -> None:
         """Enqueue incoming VoteEvent for collection by the active phase."""
         try:
@@ -578,26 +585,3 @@ class OrchestratorService:
 
         await self._vote_queue.put(vote)
         logger.debug(f'Vote queued: {vote.voter_id} -> {vote.target_id}')
-
-    async def _on_host_answer(self, routing_key: str, body: bytes) -> None:
-        """Route agent answers to waiting REST futures or cache them."""
-        try:
-            from shared.models import AgentAnswer
-
-            answer = AgentAnswer.model_validate(json.loads(body))
-        except Exception as exc:
-            logger.error(f'Failed to parse host.answer ({routing_key}): {exc}')
-            return
-
-        fut = self._pending_answers.get(answer.question_id)
-        if fut is not None and not fut.done():
-            fut.set_result(answer.answer_text)
-        else:
-            # No one is waiting yet — cache so the polling endpoint can retrieve it
-            self._answer_cache[answer.question_id] = answer.answer_text
-
-    def _signal_turn_complete(self, agent_id: str) -> None:
-        """Mark the agent's turn as done so the game loop can advance."""
-        event = self._turn_events.get(agent_id)
-        if event is not None:
-            event.set()
