@@ -1,14 +1,14 @@
 import asyncio
-import json
 import random
+import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
 from loguru import logger
 
 from shared.database import Database
-from shared.messaging import MessagingClient
 from shared.models import (
+    AgentAnswer,
     AgentInfo,
     AgentRole,
     AgentState,
@@ -24,6 +24,7 @@ from shared.models import (
 
 from ..config import GameServiceSettings
 from .agent_logic import AgentLogic
+from .event_bus import EventBus, EventType
 from .vote_resolver import resolve_votes
 
 
@@ -132,11 +133,13 @@ class GameService:
 
     """
 
-    def __init__(self, settings: GameServiceSettings) -> None:
+    def __init__(
+        self, settings: GameServiceSettings, event_bus: EventBus | None = None
+    ) -> None:
         self._settings = settings
-        self._messaging = MessagingClient(settings.amqp_url)
         self._db = Database()
         self._agent_manager = AgentManager(settings.llm_url, self._db)
+        self._event_bus = event_bus or EventBus()
 
         # Game state
         self._round: int = 0
@@ -165,18 +168,15 @@ class GameService:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Connect to RabbitMQ, Database and subscribe to all game channels."""
+        """Connect to Database and initialize game data."""
         await self._db.connect()
         await self._db.init_from_yaml(self._settings.db_yaml_path)
-        await self._messaging.connect()
-        await self._messaging.subscribe('vote.*', self._on_vote)
         logger.info('GameService started')
 
     async def stop(self) -> None:
         """Cancel the game task and close all connections."""
         if self._game_task is not None and not self._game_task.done():
             self._game_task.cancel()
-        await self._messaging.close()
         await self._agent_manager.close()
         await self._db.close()
         logger.info('GameService stopped')
@@ -322,11 +322,22 @@ class GameService:
 
         """
         try:
-            answer = await asyncio.wait_for(
+            answer_text = await asyncio.wait_for(
                 self._agent_manager.answer_question(agent_id, question_text),
                 timeout=timeout,
             )
-            return answer
+
+            # Create AgentAnswer event for UI
+            answer = AgentAnswer(
+                question_id=str(uuid.uuid4()),
+                agent_id=agent_id,
+                answer_text=answer_text,
+            )
+
+            # Publish to EventBus for UI
+            await self._event_bus.publish_async(EventType.ANSWER, answer)
+
+            return answer_text
         except (asyncio.TimeoutError, Exception) as exc:
             logger.warning(f'Failed to get answer from {agent_id}: {exc}')
             return None
@@ -485,6 +496,9 @@ class GameService:
                 )
                 self._messages.append(message)
 
+                # Publish to EventBus for UI
+                await self._event_bus.publish_async(EventType.MESSAGE, message)
+
                 # Notify SSE subscribers
                 for queue in self._message_queues:
                     await queue.put(message)
@@ -581,15 +595,6 @@ class GameService:
         self._alive.remove(agent_id)
         self._eliminated.append(agent_id)
 
-        elimination_state = GameState(
-            round=self._round,
-            phase=self._phase,
-            alive_agents=list(self._alive),
-            eliminated=list(self._eliminated),
-        )
-        await self._messaging.publish(
-            f'game.state.eliminated.{agent_id}', elimination_state
-        )
         await self._agent_manager.eliminate_agent(agent_id)
         logger.info(f'Agent {agent_id} eliminated')
 
@@ -638,14 +643,15 @@ class GameService:
         logger.info(f'Phase -> {phase} (round {self._round})')
 
     async def _publish_game_state(self) -> None:
-        """Publish the current GameState to the ``game.state`` routing key."""
+        """Publish the current GameState to EventBus for UI."""
         state = GameState(
             round=self._round,
             phase=self._phase,
             alive_agents=list(self._alive),
             eliminated=list(self._eliminated),
         )
-        await self._messaging.publish('game.state', state)
+        # Publish to EventBus for UI
+        await self._event_bus.publish_async(EventType.STATE_CHANGE, state)
 
     def _drain_vote_queue(self) -> None:
         """Discard any votes left in the queue from previous phases."""
@@ -658,18 +664,3 @@ class GameService:
                 break
         if drained:
             logger.debug(f'Drained {drained} stale votes from queue')
-
-    # ------------------------------------------------------------------
-    # RabbitMQ callbacks
-    # ------------------------------------------------------------------
-
-    async def _on_vote(self, routing_key: str, body: bytes) -> None:
-        """Enqueue incoming VoteEvent for collection by the active phase."""
-        try:
-            vote = VoteEvent.model_validate(json.loads(body))
-        except Exception as exc:
-            logger.error(f'Failed to parse vote ({routing_key}): {exc}')
-            return
-
-        await self._vote_queue.put(vote)
-        logger.debug(f'Vote queued: {vote.voter_id} -> {vote.target_id}')

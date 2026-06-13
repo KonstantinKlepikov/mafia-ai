@@ -4,43 +4,49 @@ AI-powered Mafia game with autonomous agents.
 
 ## 🏗️ Architecture
 
-**Unified architecture**:
+**Integrated architecture**:
 
 ```text
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Admin (Flet)   │────▶│  Game Service    │────▶│    LLM      │
-│  Desktop UI     │ HTTP│  FSM + Agents    │ HTTP│   Pool      │
-└─────────────────┘     └──────────────────┘     └─────────────┘
-                               │                         │
-                               │ RabbitMQ (votes)        │ HTTP
-                               ▼                         ▼
-                        ┌──────────────┐         ┌─────────────┐
-                        │  RabbitMQ    │         │   Ollama    │
-                        │  Messaging   │         │   Runtime   │
-                        └──────────────┘         └─────────────┘
+┌─────────────────────────────────────────┐     ┌─────────────┐
+│     Game Service (Unified)              │     │    LLM      │
+│   ┌──────────┐    ┌────────────────┐    │────▶│   Pool      │
+│   │  Flet UI │    │ FSM + Agents   │    │ HTTP│             │
+│   │ (Thread) │◀──▶│ (EventBus)     │    │     └─────────────┘
+│   └──────────┘    └────────────────┘    │           │ HTTP
+│                                         │           ▼
+└─────────────────────────────────────────┘     ┌─────────────┐
+                                                │   Ollama    │
+                                                │   Runtime   │
+                                                └─────────────┘
 ```
 
 ### Core Services
 
-- **Game Service** — Unified orchestrator + agent manager. Handles game FSM, coordinates phases (day/night), manages all AI agents internally via direct async calls
+- **Game Service** — Unified service combining game orchestration, agent management, and admin UI:
+    - **FSM Engine** — Game state machine handling phases (day/night/voting)
+    - **Agent Manager** — Embedded AI agents with direct async communication
+    - **EventBus** — Internal pub/sub for UI synchronization (MESSAGE, VOTE, ANSWER, STATE_CHANGE events)
+    - **Flet UI** — Integrated admin interface running in daemon thread (port 8550)
+    - **FastAPI** — REST API for external integrations (port 8081)
 - **LLM Pool** — Parallel LLM inference with round-robin load balancing
-- **Admin Flet** — Desktop UI for game control and monitoring
-- **RabbitMQ** — Event bus for votes and game state updates
-- **SQLite (in-memory)** — Persona storage and game state
+- **SQLite (in-memory)** — Persona storage
 
-### Key Changes from Old Architecture
+### Key Architecture Principles
 
-**Before**: Orchestrator + Unified Agent (2 services with HTTP communication) + ChromaDB
-**After**: Game Service (1 unified service with embedded agent manager) + SQLite
+**Monolithic Design**:
+
+- Single service with embedded UI and business logic
+- Direct method calls instead of HTTP/RabbitMQ for UI communication
+- EventBus for internal event propagation
+- Separate daemon thread for Flet UI (non-blocking)
 
 **Benefits**:
 
-- ⚡ No HTTP overhead between orchestrator and agents (direct async method calls)
-- 🔄 Simplified architecture (single service instead of two)
-- 💾 Lighter dependencies (SQLite instead of ChromaDB)
-- 🎯 Better resource utilization (LLM pool sharing across agents)
-- 🧪 Easier testing (pure Python, no HTTP mocking)
-- 🚀 Faster agent operations (no network latency)
+- ⚡ Zero network overhead for UI operations (direct method calls)
+- 🔄 Simplified deployment (single container)
+- 💾 Lighter dependencies (no separate UI service)
+- 🎯 Better resource utilization (shared event loop)
+- 🧪 Easier testing (in-process communication)
 
 ## 🚀 Build & Run
 
@@ -86,6 +92,10 @@ make check
 docker compose -f infra/docker-compose.yml restart mafia-ai-game-service
 ```
 
+### Access Points
+
+- **Admin UI**: http://localhost:38550 (Flet web interface)
+
 ## 📁 Project Structure
 
 ```txt
@@ -94,23 +104,25 @@ mafia-ai/
 │   └── prompts.yaml           # Persona definitions (10 characters)
 ├── src/
 │   ├── services/
-│   │   ├── unified_agent/     # Single agent service (FastAPI)
-│   │   ├── orchestrator/      # Game state machine
+│   │   ├── game_service/      # Unified game + UI service (FastAPI + Flet)
+│   │   │   ├── core/
+│   │   │   │   ├── event_bus.py       # Internal pub/sub
+│   │   │   │   ├── service.py         # Game FSM + agents
+│   │   │   │   └── agent_logic.py     # Agent behavior
+│   │   │   ├── ui/
+│   │   │   │   ├── service_adapter.py # Direct method calls
+│   │   │   │   └── event_adapter.py   # EventBus subscription
+│   │   │   └── main_app.py    # Integrated Flet UI
 │   │   ├── llm/               # LLM pool manager
-│   │   └── admin_flet/        # Desktop admin UI (Flet)
 │   └── shared/
 │       ├── models.py          # Pydantic models
-│       ├── database.py        # SQLite async wrapper
-│       ├── messaging.py       # RabbitMQ client
-│       └── telemetry.py       # OpenTelemetry setup
+│       └── database.py        # SQLite async wrapper
 ├── tests/
 │   └── unit/                  # Unit tests (83 tests)
 └── infra/
     ├── docker-compose.yml     # Service definitions
-    ├── unified_agent/         # Unified agent Dockerfile
-    ├── orchestrator/          # Orchestrator Dockerfile
     ├── llm/                   # LLM service Dockerfile
-    └── admin_flet/            # Admin Dockerfile
+    └── game_service/          # Admin Dockerfile
 ```
 
 ## 🧪 Testing
@@ -130,17 +142,7 @@ poetry run pytest tests/unit/ --cov=src --cov-report=html
 
 ### Services
 
-- **[Game Service](http://localhost:38081)**:
 - **[LLM Service](http://localhost:38080)**:
-
-### Monitoring & Observability
-
-- **[RabbitMQ Management](http://localhost:35673)** (guest/guest)
-- **[Zipkin Telemetry](http://localhost:29411)**
-- **[Grafana Dashboards](http://localhost:33000)** (admin/admin)
-    - Mafia-AI — Service Metrics
-    - Mafia-AI — Log Analytics
-- **[Prometheus](http://localhost:39090)**
 - **[Admin-flet](http://localhost:38550)**
 
 ## 📊 Configuration
@@ -150,9 +152,6 @@ poetry run pytest tests/unit/ --cov=src --cov-report=html
 Key environment variables (see `infra/.env.example`):
 
 ```bash
-# RabbitMQ
-AMQP_URL=amqp://guest:guest@mafia-ai-rabbitmq:5672/
-
 # LLM Settings
 OLLAMA_URL=http://mafia-ai-ollama:11434
 OLLAMA_MODEL=llama3.1:8b
@@ -163,10 +162,6 @@ AGENT_COUNT=10
 MAFIA_COUNT=2
 PHASE_DURATION_SECONDS=300
 VOTE_TIMEOUT_SECONDS=60
-
-# Telemetry
-OTEL_SDK_DISABLED=false
-OTEL_EXPORTER_OTLP_ENDPOINT=http://mafia-ai-otel-collector:4317
 ```
 
 ### Persona Configuration
@@ -218,7 +213,3 @@ MIT License. See [LICENSE](LICENSE) for details.
 ## 🔬 Research
 
 Experimental code and design documents are in `research/`:
-
-- `core-refactoring-plane.md` — Architectural refactoring plan
-- `repo-plane.md` — Repository analysis
-- `claude-plane.md` — AI agent design notes

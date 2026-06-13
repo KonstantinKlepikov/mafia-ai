@@ -1,5 +1,3 @@
-"""Unit tests for the LLM MCP service."""
-
 import pytest
 from pydantic import ValidationError
 

@@ -1,9 +1,10 @@
 """Ask agent panel UI component."""
 
 import flet as ft
-from admin_flet.core.client import AsyncOrchestratorClient, OrchestratorClientError
 
 from shared.models import AgentInfo
+
+from .service_adapter import GameServiceAdapter, GameServiceAdapterError
 
 
 class AskAgentPanel:
@@ -15,7 +16,7 @@ class AskAgentPanel:
 
     def __init__(
         self,
-        client: AsyncOrchestratorClient,
+        client: GameServiceAdapter,
         get_agents_fn,  # type: ignore[no-untyped-def]
     ) -> None:
         self._client = client
@@ -96,7 +97,7 @@ class AskAgentPanel:
                         bgcolor=ft.Colors.GREEN,
                     )
                 )
-        except OrchestratorClientError as exc:
+        except GameServiceAdapterError as exc:
             if e.page:
                 e.page.show_dialog(
                     ft.SnackBar(

@@ -1,7 +1,8 @@
 """Game control panel UI component."""
 
 import flet as ft
-from admin_flet.core.client import AsyncOrchestratorClient, OrchestratorClientError
+
+from .service_adapter import GameServiceAdapter, GameServiceAdapterError
 
 
 class GameControls:
@@ -13,7 +14,7 @@ class GameControls:
 
     def __init__(
         self,
-        client: AsyncOrchestratorClient,
+        client: GameServiceAdapter,
         on_game_started,  # type: ignore[no-untyped-def]
     ) -> None:
         self._client = client
@@ -61,7 +62,7 @@ class GameControls:
                         bgcolor=ft.Colors.GREEN,
                     )
                 )
-        except OrchestratorClientError as exc:
+        except GameServiceAdapterError as exc:
             if e.page:
                 e.page.show_dialog(
                     ft.SnackBar(

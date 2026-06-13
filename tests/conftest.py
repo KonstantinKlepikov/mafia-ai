@@ -1,14 +1,9 @@
-"""Global pytest configuration and fixtures."""
-
 import os
-from typing import Generator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from loguru import logger
 
-from shared.models import AgentInfo, GamePhase, GameState, Message
-from utils import make_persona
+from shared.models import GamePhase, GameState
 
 os.environ['OTEL_SDK_DISABLED'] = 'true'
 

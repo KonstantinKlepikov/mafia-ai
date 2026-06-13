@@ -1,31 +1,49 @@
-"""Main Flet application for Mafia-AI admin panel."""
+"""Main Flet application for Mafia-AI admin panel (integrated version)."""
 
 import asyncio
 
 import flet as ft
-from admin_flet.config import AdminFletSettings
-from admin_flet.core.client import AsyncOrchestratorClient
-from admin_flet.core.subscriber import AsyncSubscriber, EventKind
-from admin_flet.ui.ask_agent_panel import AskAgentPanel
-from admin_flet.ui.game_controls import GameControls
-from admin_flet.ui.host_decision_panel import HostDecisionPanel
-from admin_flet.ui.message_feed import MessageFeed
-from admin_flet.ui.status_panel import StatusPanel
 from loguru import logger
 
 from shared.models import AgentAnswer, Message, VoteEvent
-from shared.telemetry import configure_loguru
 
-configure_loguru('admin_flet')
+from ..config import GameServiceSettings
+from ..core.event_bus import EventBus
+from ..core.service import GameService
+from ..ui_config import AdminFletSettings
+from .event_adapter import EventAdapter, EventKind
+from .service_adapter import GameServiceAdapter
+from .ask_agent_panel import AskAgentPanel
+from .game_controls import GameControls
+from .host_decision_panel import HostDecisionPanel
+from .message_feed import MessageFeed
+from .status_panel import StatusPanel
 
 
 class MafiaAdminApp:
-    """Mafia-AI admin panel application."""
+    """Mafia-AI admin panel application (integrated version).
 
-    def __init__(self, settings: AdminFletSettings) -> None:
-        self._settings = settings
-        self._client = AsyncOrchestratorClient(settings.game_service_url)
-        self._subscriber = AsyncSubscriber(settings.amqp_url)
+    This version creates and manages GameService and EventBus directly.
+
+    Args:
+        game_settings: Game service configuration.
+        ui_settings: UI configuration settings.
+
+    """
+
+    def __init__(
+        self,
+        game_settings: GameServiceSettings,
+        ui_settings: AdminFletSettings,
+    ) -> None:
+        self._game_settings = game_settings
+        self._ui_settings = ui_settings
+
+        # Initialized in start()
+        self._event_bus: EventBus | None = None
+        self._game_service: GameService | None = None
+        self._client: GameServiceAdapter | None = None
+        self._subscriber: EventAdapter | None = None
 
         self._message_feed = MessageFeed()
         self._status_panel = StatusPanel()
@@ -42,9 +60,24 @@ class MafiaAdminApp:
         self._page = page
         page.title = '🃏 Mafia-AI — Game Host UI'
         page.theme_mode = ft.ThemeMode.DARK
-        page.width = self._settings.window_width
-        page.height = self._settings.window_height
+        page.width = self._ui_settings.window_width
+        page.height = self._ui_settings.window_height
 
+        # Create EventBus and GameService
+        self._event_bus = EventBus()
+        self._game_service = GameService(self._game_settings, event_bus=self._event_bus)
+
+        # Start GameService
+        try:
+            await self._game_service.start()
+            logger.info('GameService started successfully')
+        except Exception as exc:
+            logger.error(f'GameService failed to start: {exc}')
+            raise
+
+        # Create adapters
+        self._client = GameServiceAdapter(self._game_service)
+        self._subscriber = EventAdapter(self._event_bus)
         await self._subscriber.start()
 
         self._game_controls = GameControls(
@@ -123,15 +156,20 @@ class MafiaAdminApp:
             except asyncio.CancelledError:
                 pass
 
-        await self._subscriber.stop()
-        await self._client.close()
+        if self._subscriber:
+            await self._subscriber.stop()
+        if self._client:
+            await self._client.close()
+        if self._game_service:
+            await self._game_service.stop()
+            logger.info('GameService stopped')
         logger.info('MafiaAdminApp stopped')
 
     async def _update_loop(self) -> None:
         """Main update loop for real-time updates."""
         while True:
             try:
-                await asyncio.sleep(self._settings.poll_interval_seconds)
+                await asyncio.sleep(self._ui_settings.poll_interval_seconds)
                 await self._update_ui()
             except asyncio.CancelledError:
                 break
@@ -139,7 +177,10 @@ class MafiaAdminApp:
                 logger.error(f'Error in update loop: {exc}')
 
     async def _update_ui(self) -> None:
-        """Update UI with latest data from orchestrator and subscriber."""
+        """Update UI with latest data from game service and event bus."""
+        if not self._client or not self._subscriber:
+            return
+
         game_state = await self._client.get_state()
         agents = await self._client.get_agents()
 
@@ -176,25 +217,3 @@ class MafiaAdminApp:
         """Handle host decision event."""
         if self._game_controls:
             self._game_controls.add_log_entry(log_msg)
-
-
-async def main(page: ft.Page) -> None:
-    """Main entry point for Flet application."""
-    settings = AdminFletSettings()
-    app = MafiaAdminApp(settings)
-
-    try:
-        await app.start(page)
-        page.on_disconnect = lambda _: asyncio.create_task(app.stop())
-    except Exception as exc:
-        logger.error(f'Failed to start app: {exc}')
-        raise
-
-
-def run() -> None:
-    """Run the Flet application."""
-    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=8550)
-
-
-if __name__ == '__main__':
-    run()

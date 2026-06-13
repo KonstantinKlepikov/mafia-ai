@@ -4,7 +4,6 @@ Expose common Pydantic models used across services.
 """
 
 from .database import Database
-from .messaging import MessagingClient
 from .models import (
     AgentRole,
     AgentState,
@@ -23,7 +22,6 @@ __all__ = [
     'GamePhase',
     'GameState',
     'Message',
-    'MessagingClient',
     'SystemPrompt',
     'TargetAudience',
     'VoteEvent',

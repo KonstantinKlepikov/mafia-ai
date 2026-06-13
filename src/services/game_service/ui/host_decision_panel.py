@@ -1,9 +1,10 @@
 """Host decision panel UI component."""
 
 import flet as ft
-from admin_flet.core.client import AsyncOrchestratorClient, OrchestratorClientError
 
 from shared.models import AgentInfo, GameState, HostDecision, HostDecisionAction
+
+from .service_adapter import GameServiceAdapter, GameServiceAdapterError
 
 
 class HostDecisionPanel:
@@ -16,7 +17,7 @@ class HostDecisionPanel:
 
     def __init__(
         self,
-        client: AsyncOrchestratorClient,
+        client: GameServiceAdapter,
         get_agents_fn,  # type: ignore[no-untyped-def]
         on_decision_fn,  # type: ignore[no-untyped-def]
     ) -> None:
@@ -127,7 +128,7 @@ class HostDecisionPanel:
                         bgcolor=ft.Colors.GREEN,
                     )
                 )
-        except OrchestratorClientError as exc:
+        except GameServiceAdapterError as exc:
             if page:
                 page.show_dialog(
                     ft.SnackBar(

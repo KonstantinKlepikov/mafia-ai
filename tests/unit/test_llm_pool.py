@@ -1,5 +1,3 @@
-"""Unit tests for LLM Pool optimization modules."""
-
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -10,12 +8,7 @@ from services.llm.core.resource_detection import (
     calculate_pool_size,
     detect_hardware,
 )
-from services.llm.schemas.llm_schemas import (
-    GenerateRequest,
-    GenerateResponse,
-    MessageItem,
-    Usage,
-)
+from services.llm.schemas.llm_schemas import GenerateRequest, MessageItem
 
 
 class TestResourceDetection:
@@ -233,6 +226,7 @@ class TestModelPool:
 
         # Launch 4 requests concurrently
         import asyncio
+
         tasks = [pool.generate(request) for _ in range(4)]
         responses = await asyncio.gather(*tasks)
 
