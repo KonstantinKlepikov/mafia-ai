@@ -8,29 +8,21 @@ AI-powered Mafia game with autonomous agents.
 
 ```text
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Admin (Flet)   │────▶│  Orchestrator    │────▶│    LLM      │
-│  Desktop UI     │ HTTP│  Game FSM        │ HTTP│   Pool      │
+│  Admin (Flet)   │────▶│  Game Service    │────▶│    LLM      │
+│  Desktop UI     │ HTTP│  FSM + Agents    │ HTTP│   Pool      │
 └─────────────────┘     └──────────────────┘     └─────────────┘
                                │                         │
-                               │ HTTP                    │ HTTP
+                               │ RabbitMQ (votes)        │ HTTP
                                ▼                         ▼
                         ┌──────────────┐         ┌─────────────┐
-                        │Unified Agent │         │   Ollama    │
-                        │All AI agents │         │   Runtime   │
+                        │  RabbitMQ    │         │   Ollama    │
+                        │  Messaging   │         │   Runtime   │
                         └──────────────┘         └─────────────┘
-                               │
-                               │ RabbitMQ (votes)
-                               ▼
-                        ┌──────────────┐
-                        │  RabbitMQ    │
-                        │  Messaging   │
-                        └──────────────┘
 ```
 
 ### Core Services
 
-- **Orchestrator** — Game state machine, coordinates phases (day/night), vote resolution
-- **Unified Agent** — Single FastAPI service managing all AI agents
+- **Game Service** — Unified orchestrator + agent manager. Handles game FSM, coordinates phases (day/night), manages all AI agents internally via direct async calls
 - **LLM Pool** — Parallel LLM inference with round-robin load balancing
 - **Admin Flet** — Desktop UI for game control and monitoring
 - **RabbitMQ** — Event bus for votes and game state updates
@@ -38,16 +30,17 @@ AI-powered Mafia game with autonomous agents.
 
 ### Key Changes from Old Architecture
 
-**Before**: N agent containers + ChromaDB + Streamlit + Docker SDK management
-**After**: 1 unified agent service + SQLite + Flet + REST API coordination
+**Before**: Orchestrator + Unified Agent (2 services with HTTP communication) + ChromaDB
+**After**: Game Service (1 unified service with embedded agent manager) + SQLite
 
 **Benefits**:
 
-- ⚡ Faster agent initialization (no Docker container overhead)
-- 🔄 Simplified message flow (HTTP calls instead of async RabbitMQ callbacks)
+- ⚡ No HTTP overhead between orchestrator and agents (direct async method calls)
+- 🔄 Simplified architecture (single service instead of two)
 - 💾 Lighter dependencies (SQLite instead of ChromaDB)
 - 🎯 Better resource utilization (LLM pool sharing across agents)
-- 🧪 Easier testing (pure Python, no Docker mocking)
+- 🧪 Easier testing (pure Python, no HTTP mocking)
+- 🚀 Faster agent operations (no network latency)
 
 ## 🚀 Build & Run
 
@@ -90,7 +83,7 @@ make check
 ### Service Restart Example
 
 ```bash
-docker compose -f infra/docker-compose.yml restart mafia-ai-orchestrator
+docker compose -f infra/docker-compose.yml restart mafia-ai-game-service
 ```
 
 ## 📁 Project Structure
@@ -137,23 +130,8 @@ poetry run pytest tests/unit/ --cov=src --cov-report=html
 
 ### Services
 
-- **[Orchestrator API](http://localhost:38081)**:
-    - `GET /game/state` — Current game state
-    - `POST /game/start` — Start new game
-    - `GET /game/agents` — List all agents
-    - `POST /game/agents/{id}/question` — Ask agent a question
-    - `POST /game/host/decision` — Submit host decision
-
-- **[Unified Agent API](http://localhost:38082)**:
-    - `POST /agents/{id}/init` — Initialize agent
-    - `POST /agents/{id}/act` — Execute agent action
-    - `GET /agents/{id}/state` — Get agent state
-    - `DELETE /agents/{id}` — Eliminate agent
-    - `GET /health` — Health check
-
+- **[Game Service](http://localhost:38081)**:
 - **[LLM Service](http://localhost:38080)**:
-    - `POST /generate` — Generate LLM response
-    - `GET /health` — Health check
 
 ### Monitoring & Observability
 

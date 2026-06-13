@@ -3,6 +3,7 @@ import json
 import random
 from collections.abc import AsyncGenerator
 
+import httpx
 from loguru import logger
 
 from shared.database import Database
@@ -17,34 +18,125 @@ from shared.models import (
     HostDecision,
     HostDecisionAction,
     Message,
+    SystemPrompt,
     VoteEvent,
 )
 
-from ..config import OrchestratorSettings
-from .unified_agent_client import UnifiedAgentClient
+from ..config import GameServiceSettings
+from .agent_logic import AgentLogic
 from .vote_resolver import resolve_votes
 
 
-class OrchestratorService:
-    """Game orchestrator: manages phases, agents, votes, and host interaction.
+class AgentManager:
+    """Manages all AI agents in a single process.
+
+    Args:
+        llm_url: Base URL of the LLM service (e.g. 'http://llm:8080').
+        db: Database instance with personas and state storage.
+
+    """
+
+    def __init__(self, llm_url: str, db: Database) -> None:
+        self._llm_url = llm_url
+        self._db = db
+        self._llm_client = httpx.AsyncClient(base_url=llm_url, timeout=60.0)
+        self._agents: dict[str, AgentLogic] = {}
+
+    async def initialize_agent(
+        self, agent_id: str, role: AgentRole, persona_id: str
+    ) -> None:
+        """Initialize a new agent with given role and persona."""
+        persona = await self._db.get_persona(persona_id)
+
+        system_prompt = SystemPrompt(
+            persona_id=persona.persona_id,
+            name=persona.name,
+            persona_type=persona.persona_type,
+            prompt=persona.prompt,
+        )
+
+        agent_logic = AgentLogic(
+            agent_id=agent_id,
+            persona=system_prompt,
+            llm_client=self._llm_client,
+            db=self._db,
+        )
+        self._agents[agent_id] = agent_logic
+
+        state = AgentState(
+            agent_id=agent_id,
+            role=role,
+            persona_id=persona_id,
+            message_history=[],
+        )
+        await self._db.upsert_agent_state(agent_id, state)
+
+        logger.info(
+            f'Agent {agent_id} initialized with role={role}, persona={persona_id}'
+        )
+
+    async def get_state(self, agent_id: str) -> AgentState | None:
+        """Get current state of an agent from DB."""
+        if agent_id not in self._agents:
+            return None
+
+        state = await self._db.get_agent_state(agent_id)
+        return state
+
+    async def eliminate_agent(self, agent_id: str) -> None:
+        """Mark agent as eliminated (remove from active agents)."""
+        if agent_id not in self._agents:
+            logger.warning(f'Attempted to eliminate non-initialized agent {agent_id}')
+            return
+
+        await self._db.update_agent_status(agent_id, AgentStatus.ELIMINATED)
+        del self._agents[agent_id]
+
+        logger.info(f'Agent {agent_id} eliminated and removed')
+
+    async def generate_message(self, agent_id: str, phase: str, game_round: int) -> str:
+        """Generate a message for the current phase."""
+        if agent_id not in self._agents:
+            raise ValueError(f'Agent {agent_id} not initialized')
+
+        agent = self._agents[agent_id]
+        phase_enum = GamePhase(phase)
+        return await agent.generate_message(phase_enum, game_round)
+
+    async def answer_question(self, agent_id: str, question_text: str) -> str:
+        """Generate answer to host question."""
+        if agent_id not in self._agents:
+            raise ValueError(f'Agent {agent_id} not initialized')
+
+        agent = self._agents[agent_id]
+        return await agent.answer_question(question_text)
+
+    async def close(self) -> None:
+        """Close HTTP client and cleanup resources."""
+        await self._llm_client.aclose()
+        logger.info('AgentManager closed')
+
+
+class GameService:
+    """Unified game orchestrator and agent manager.
 
     Runs an asyncio game loop as a background task once a game is started.
-    Uses unified agent service REST API for agent coordination.
+    Manages all AI agents internally without HTTP overhead.
 
     The FSM cycle per round:
     NIGHT → NIGHT_VOTE → RESOLVE_NIGHT → DAY → DAY_VOTE → HOST_DECISION
     → (next NIGHT | GAME_OVER)
 
     Args:
-        settings: Populated OrchestratorSettings instance.
+        settings: Populated GameServiceSettings instance.
 
     """
 
-    def __init__(self, settings: OrchestratorSettings) -> None:
+    def __init__(self, settings: GameServiceSettings) -> None:
         self._settings = settings
         self._messaging = MessagingClient(settings.amqp_url)
         self._db = Database()
-        self._agent_client = UnifiedAgentClient(settings.unified_agent_url)
+        self._agent_manager = AgentManager(settings.llm_url, self._db)
 
         # Game state
         self._round: int = 0
@@ -75,19 +167,19 @@ class OrchestratorService:
     async def start(self) -> None:
         """Connect to RabbitMQ, Database and subscribe to all game channels."""
         await self._db.connect()
-        await self._db.init_from_yaml('config/prompts.yaml')
+        await self._db.init_from_yaml(self._settings.db_yaml_path)
         await self._messaging.connect()
         await self._messaging.subscribe('vote.*', self._on_vote)
-        logger.info('OrchestratorService started')
+        logger.info('GameService started')
 
     async def stop(self) -> None:
         """Cancel the game task and close all connections."""
         if self._game_task is not None and not self._game_task.done():
             self._game_task.cancel()
         await self._messaging.close()
-        await self._agent_client.close()
+        await self._agent_manager.close()
         await self._db.close()
-        logger.info('OrchestratorService stopped')
+        logger.info('GameService stopped')
 
     # ------------------------------------------------------------------
     # Public interface (called by REST handlers)
@@ -152,7 +244,7 @@ class OrchestratorService:
 
         """
         tasks = {
-            agent_id: self._agent_client.get_state(agent_id)
+            agent_id: self._agent_manager.get_state(agent_id)
             for agent_id in self._alive
         }
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -192,7 +284,7 @@ class OrchestratorService:
             AgentInfo on success, or None if unreachable / unknown.
 
         """
-        state = await self._agent_client.get_state(agent_id)
+        state = await self._agent_manager.get_state(agent_id)
         if state is None:
             return None
 
@@ -205,9 +297,7 @@ class OrchestratorService:
                 pass
 
         status = (
-            AgentStatus.ALIVE
-            if agent_id in self._alive
-            else AgentStatus.ELIMINATED
+            AgentStatus.ALIVE if agent_id in self._alive else AgentStatus.ELIMINATED
         )
         return AgentInfo(
             agent_id=agent_id,
@@ -220,7 +310,7 @@ class OrchestratorService:
     async def ask_agent(
         self, agent_id: str, question_text: str, timeout: float = 60.0
     ) -> str | None:
-        """Ask agent a question via REST API and return the answer.
+        """Ask agent a question and return the answer.
 
         Args:
             agent_id: ID of the agent to ask.
@@ -233,7 +323,7 @@ class OrchestratorService:
         """
         try:
             answer = await asyncio.wait_for(
-                self._agent_client.answer_question(agent_id, question_text),
+                self._agent_manager.answer_question(agent_id, question_text),
                 timeout=timeout,
             )
             return answer
@@ -242,7 +332,7 @@ class OrchestratorService:
             return None
 
     async def force_stop_agent(self, agent_id: str) -> None:
-        """Force-eliminate an agent and stop its container.
+        """Force-eliminate an agent.
 
         Args:
             agent_id: ID of the agent to remove from the game.
@@ -286,9 +376,9 @@ class OrchestratorService:
         self._host_decision_event.clear()
         self._drain_vote_queue()
 
-        # Initialize agents via unified agent service REST API
+        # Initialize agents via agent manager (direct call, no HTTP)
         for aid in all_agent_ids:
-            await self._agent_client.initialize_agent(
+            await self._agent_manager.initialize_agent(
                 aid, self._roles[aid], persona_map[aid]
             )
             logger.info(
@@ -379,7 +469,7 @@ class OrchestratorService:
 
             try:
                 message_text = await asyncio.wait_for(
-                    self._agent_client.generate_message(
+                    self._agent_manager.generate_message(
                         agent_id, self._phase.value, self._round
                     ),
                     timeout=per_agent_timeout,
@@ -409,9 +499,7 @@ class OrchestratorService:
                     f'{per_agent_timeout:.1f}s; moving on'
                 )
             except Exception as exc:
-                logger.error(
-                    f'Agent {agent_id} message generation failed: {exc}'
-                )
+                logger.error(f'Agent {agent_id} message generation failed: {exc}')
 
     async def _collect_votes(self, expected: int, suffix: str) -> list[VoteEvent]:
         """Collect votes from the queue until expected count or timeout.
@@ -481,7 +569,7 @@ class OrchestratorService:
         raise ValueError(f'Unknown decision action: {decision.action}')
 
     async def _eliminate_agent(self, agent_id: str) -> None:
-        """Remove agent from alive list, publish state, and eliminate via API.
+        """Remove agent from alive list, publish state, and eliminate via manager.
 
         Args:
             agent_id: ID of the agent to eliminate.
@@ -502,7 +590,7 @@ class OrchestratorService:
         await self._messaging.publish(
             f'game.state.eliminated.{agent_id}', elimination_state
         )
-        await self._agent_client.eliminate_agent(agent_id)
+        await self._agent_manager.eliminate_agent(agent_id)
         logger.info(f'Agent {agent_id} eliminated')
 
     def _check_and_handle_win(self) -> bool:

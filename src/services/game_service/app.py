@@ -1,4 +1,3 @@
-import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -6,28 +5,27 @@ from typing import AsyncIterator
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from pydantic import BaseModel
 
 from shared.models import AgentInfo, GameState, HostDecision
 from shared.telemetry import configure_loguru, instrument_app, setup_tracing
 
-from .config import OrchestratorSettings
-from .core.service import OrchestratorService
+from .config import GameServiceSettings
+from .core.service import GameService
 
-_SERVICE_NAME = 'orchestrator'
+_SERVICE_NAME = 'game_service'
 setup_tracing(_SERVICE_NAME)
 configure_loguru(_SERVICE_NAME)
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI) -> AsyncIterator[dict[str, OrchestratorService]]:
-    settings = OrchestratorSettings()
-    service = OrchestratorService(settings)
+async def _lifespan(app: FastAPI) -> AsyncIterator[dict[str, GameService]]:
+    settings = GameServiceSettings()
+    service = GameService(settings)
     try:
         await service.start()
     except Exception as exc:
-        logger.error(f'OrchestratorService failed to start: {exc}')
-    logger.info('Orchestrator HTTP server ready')
+        logger.error(f'GameService failed to start: {exc}')
+    logger.info('Game Service HTTP server ready')
     try:
         yield {'service': service}
     finally:
@@ -35,15 +33,15 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[dict[str, OrchestratorService
 
 
 app = FastAPI(
-    title='Orchestrator Service',
-    description='Mafia-AI game orchestrator — manages game cycle and agents.',
+    title='Game Service',
+    description='Mafia-AI unified game orchestrator and agent manager.',
     version='0.1.0',
     lifespan=_lifespan,
 )
 instrument_app(app, _SERVICE_NAME)
 
 
-def _svc(request: Request) -> OrchestratorService:
+def _svc(request: Request) -> GameService:
     return request.state.service
 
 
@@ -127,48 +125,9 @@ async def get_agent(request: Request, agent_id: str) -> AgentInfo:
     return info
 
 
-class _QuestionRequest(BaseModel):
-    question_text: str
-
-
-@app.post('/game/agents/{agent_id}/question', status_code=202)
-async def ask_agent_question(
-    request: Request,
-    agent_id: str,
-    body: _QuestionRequest,
-) -> dict[str, str]:
-    """Ask an agent a question on behalf of the host.
-
-    Publishes a ``HostQuestion`` message to the agent via RabbitMQ and
-    returns a ``question_id`` that can be used to retrieve the answer.
-    """
-    question_id = str(uuid.uuid4())
-    await _svc(request).ask_agent(agent_id, question_id, body.question_text)
-    return {'question_id': question_id}
-
-
-@app.get('/game/agents/{agent_id}/question/{question_id}')
-async def get_agent_answer(
-    request: Request,
-    agent_id: str,
-    question_id: str,
-) -> dict[str, str]:
-    """Poll for an agent's answer to a previously submitted question.
-
-    Waits up to 60 seconds. Returns 408 if no answer arrives in time.
-    """
-    answer = await _svc(request).get_agent_answer(question_id, timeout=60.0)
-    if answer is None:
-        raise HTTPException(
-            status_code=408,
-            detail=f'Answer for question {question_id!r} not received within timeout',
-        )
-    return {'answer': answer}
-
-
 @app.delete('/game/agents/{agent_id}', status_code=200)
 async def force_stop_agent(request: Request, agent_id: str) -> dict[str, str]:
-    """Force-eliminate an agent and stop its Docker container.
+    """Force-eliminate an agent.
 
     Use for emergency removal outside the normal game flow.
     """

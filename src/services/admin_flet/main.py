@@ -24,7 +24,7 @@ class MafiaAdminApp:
 
     def __init__(self, settings: AdminFletSettings) -> None:
         self._settings = settings
-        self._client = AsyncOrchestratorClient(settings.orchestrator_url)
+        self._client = AsyncOrchestratorClient(settings.game_service_url)
         self._subscriber = AsyncSubscriber(settings.amqp_url)
 
         self._message_feed = MessageFeed()

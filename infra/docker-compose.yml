@@ -85,49 +85,24 @@ services:
       retries: 5
       start_period: 10s
 
-  mafia-ai-unified-agent:
+  mafia-ai-game-service:
     build:
       context: ..
-      dockerfile: infra/unified_agent/Dockerfile
-    container_name: mafia-ai-unified-agent
-    env_file:
-      - .env
-    ports:
-      - "38082:8082"
-    environment:
-      - LLM_URL=${LLM_URL?Variable not set}
-      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
-      - MESSAGE_MAX_TOKENS=${MESSAGE_MAX_TOKENS?Variable not set}
-      - VOTE_MAX_TOKENS=${VOTE_MAX_TOKENS?Variable not set}
-    networks:
-      - game_net
-    depends_on:
-      mafia-ai-llm:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8100/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-  mafia-ai-orchestrator:
-    build:
-      context: ..
-      dockerfile: infra/orchestrator/Dockerfile
-    container_name: mafia-ai-orchestrator
+      dockerfile: infra/game_service/Dockerfile
+    container_name: mafia-ai-game-service
     env_file:
       - .env
     ports:
       - "38081:8081"
     environment:
       - AMQP_URL=${AMQP_URL?Variable not set}
-      - UNIFIED_AGENT_URL=${UNIFIED_AGENT_URL?Variable not set}
+      - LLM_URL=${LLM_URL?Variable not set}
       - AGENT_COUNT=${AGENT_COUNT?Variable not set}
       - MAFIA_COUNT=${MAFIA_COUNT?Variable not set}
       - PHASE_DURATION_SECONDS=${PHASE_DURATION_SECONDS?Variable not set}
       - VOTE_TIMEOUT_SECONDS=${VOTE_TIMEOUT_SECONDS?Variable not set}
+      - MESSAGE_MAX_TOKENS=${MESSAGE_MAX_TOKENS?Variable not set}
+      - VOTE_MAX_TOKENS=${VOTE_MAX_TOKENS?Variable not set}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT?Variable not set}
       - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED?Variable not set}
     volumes:
@@ -137,7 +112,7 @@ services:
     depends_on:
       mafia-ai-rabbitmq:
         condition: service_healthy
-      mafia-ai-unified-agent:
+      mafia-ai-llm:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8081/game/state"]
@@ -156,13 +131,12 @@ services:
     ports:
       - "38550:8550"
     environment:
-      - ADMIN_FLET_ORCHESTRATOR_URL=${ORCHESTRATOR_URL?Variable not set}
-      - ADMIN_FLET_AMQP_URL=${AMQP_URL?Variable not set}
-      - ADMIN_FLET_POLL_INTERVAL_SECONDS=${ADMIN_FLET_POLL_INTERVAL_SECONDS:-2.0}
+      - GAME_SERVICE_URL=${GAME_SERVICE_URL?Variable not set}
+      - AMQP_URL=${AMQP_URL?Variable not set}
     networks:
       - game_net
     depends_on:
-      mafia-ai-orchestrator:
+      mafia-ai-game-service:
         condition: service_healthy
       mafia-ai-rabbitmq:
         condition: service_healthy
