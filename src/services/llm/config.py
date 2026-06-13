@@ -5,15 +5,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class LLMSettings(BaseSettings):
-    # Base URL of the Ollama REST server
-    ollama_url: HttpUrl
+    """LLM service settings.
 
-    # Name of the model to use for generation
-    ollama_model: str
+    Attrs:
+        ollama_url: Base URL of the Ollama REST server.
+        ollama_model: Name of the model to use for generation.
+        llm_queue_max_size: Maximum number of pending requests
+            (legacy, for backward compat).
+        llm_pool_size: Number of parallel model instances (0 = auto-detect).
 
-    # Maximum number of pending requests in the rate-limiting queue.
-    # Requests beyond this limit will block until a slot becomes available.
-    llm_queue_max_size: int
+    """
+
+    ollama_url: HttpUrl = 'http://ollama:11434'  # type: ignore[assignment]
+    ollama_model: str = 'llama3.1:8b'
+    llm_queue_max_size: int = 100
+    llm_pool_size: int = 0
 
     model_config = SettingsConfigDict(env_prefix='', extra='ignore')
 

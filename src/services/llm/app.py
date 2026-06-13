@@ -6,22 +6,17 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, HTTPException, Request
 from loguru import logger
 
-from shared.telemetry import configure_loguru, instrument_app, setup_tracing
-
 from .config import settings
 from .core.service import LLMService
 from .schemas.llm_schemas import GenerateRequest, GenerateResponse, ResetResponse
 
-_SERVICE_NAME = 'llm-service'
-setup_tracing(_SERVICE_NAME)
-configure_loguru(_SERVICE_NAME)
-
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[dict[str, LLMService], None]:
-    service = LLMService(queue_max_size=settings.llm_queue_max_size)
+    pool_size = settings.llm_pool_size if settings.llm_pool_size > 0 else None
+    service = LLMService(pool_size=pool_size)
     await service.start()
-    logger.info('LLMService starts!')
+    logger.info('LLMService started with ModelPool!')
     try:
         yield {'service': service}
     finally:
@@ -37,7 +32,6 @@ app = FastAPI(
     version='0.1.0',
     lifespan=_lifespan,
 )
-instrument_app(app, _SERVICE_NAME)
 
 
 @app.post('/mcp/generate', response_model=GenerateResponse)

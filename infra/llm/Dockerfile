@@ -16,7 +16,7 @@ ENV PATH="/root/.local/bin:$PATH"
 
 # Copy dependency files and install production dependencies only
 COPY pyproject.toml poetry.lock poetry.toml ./
-RUN POETRY_VIRTUALENVS_CREATE=false poetry install --with dev --no-root
+RUN POETRY_VIRTUALENVS_CREATE=false poetry install --no-root
 
 # Copy shared models and the llm service source
 COPY src/shared ./shared

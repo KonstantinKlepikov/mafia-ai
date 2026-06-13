@@ -1,124 +1,63 @@
-"""LLM service: asyncio.Queue-based rate limiter wrapping Ollama chat API.
+"""LLM service: ModelPool-based parallel inference wrapping Ollama chat API.
 
-Each call to `generate()` is enqueued and processed by a single background
-worker, preventing parallel requests from overloading the model.
+Requests are handled by a pool of Ollama clients for parallel processing.
 """
 
-import asyncio
-from dataclasses import dataclass
-
-import ollama
+from loguru import logger
 
 from ..config import settings
-from ..schemas.llm_schemas import GenerateRequest, GenerateResponse, Usage
-
-
-@dataclass
-class _QueueItem:
-    request: GenerateRequest
-    future: 'asyncio.Future[GenerateResponse]'
-
-
-async def _call_ollama(
-    client: ollama.AsyncClient,
-    request: GenerateRequest,
-) -> GenerateResponse:
-    """Send a stateless generation request to Ollama.
-
-    Prepends the system prompt as a 'system' role message and forwards the
-    full conversation history on every call (no server-side context retained).
-    """
-
-    messages: list[dict[str, str]] = [
-        {'role': 'system', 'content': request.system_prompt}
-    ]
-    messages.extend({'role': m.role, 'content': m.content} for m in request.messages)
-
-    response = await client.chat(
-        model=settings.ollama_model,
-        messages=messages,  # type: ignore[arg-type]
-        options={'num_predict': request.max_tokens},
-    )
-
-    prompt_tokens: int = response.prompt_eval_count or 0
-    completion_tokens: int = response.eval_count or 0
-
-    return GenerateResponse(
-        text=response.message.content,
-        usage=Usage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-        ),
-    )
+from ..schemas.llm_schemas import GenerateRequest, GenerateResponse
+from .pool import ModelPool
+from .resource_detection import calculate_pool_size, detect_hardware
 
 
 class LLMService:
-    """Rate-limited facade over the Ollama chat API.
+    """Parallel inference facade over the Ollama chat API.
 
-    Requests are serialised through an `asyncio.Queue` so that the model
-    receives at most one concurrent call at a time.
+    Uses a ModelPool to handle multiple concurrent requests.
     """
 
-    def __init__(self, queue_max_size: int) -> None:
-        self._queue: asyncio.Queue[_QueueItem] = asyncio.Queue(maxsize=queue_max_size)
-        self._worker_task: asyncio.Task[None] | None = None
-        self._client: ollama.AsyncClient = ollama.AsyncClient(
-            host=settings.ollama_url.encoded_string()
+    def __init__(self, pool_size: int | None = None) -> None:
+        """Initialize LLM service with model pool.
+
+        Args:
+            pool_size: Number of parallel model instances (None = auto-detect).
+
+        """
+        # Auto-detect pool size if not specified
+        if pool_size is None or pool_size == 0:
+            hardware = detect_hardware()
+            pool_size = calculate_pool_size(hardware, settings.ollama_model)
+            logger.info(f'Auto-detected pool size: {pool_size}')
+        else:
+            logger.info(f'Using manual pool size: {pool_size}')
+
+        self._pool = ModelPool(
+            ollama_url=settings.ollama_url.unicode_string(),
+            model_name=settings.ollama_model,
+            pool_size=pool_size,
         )
 
     async def start(self) -> None:
-        """Start the background worker that drains the request queue."""
-        self._worker_task = asyncio.create_task(self._worker())
+        """Start the service (no-op for pool-based implementation)."""
+        logger.info('LLMService started with ModelPool')
 
     async def stop(self) -> None:
-        """Cancel the background worker and fail all pending queued requests.
-
-        Any futures still in the queue are resolved with ``RuntimeError`` so
-        callers blocked in ``generate()`` are unblocked immediately rather than
-        hanging forever.
-        """
-        if self._worker_task is not None:
-            self._worker_task.cancel()
-            try:
-                await self._worker_task
-            except asyncio.CancelledError:
-                pass
-
-        shutdown_error = RuntimeError('LLMService is shutting down')
-        while not self._queue.empty():
-            try:
-                item = self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            if not item.future.done():
-                item.future.set_exception(shutdown_error)
-
-    async def _worker(self) -> None:
-        """Process queue items sequentially, one at a time."""
-        while True:
-            item = await self._queue.get()
-            try:
-                result = await _call_ollama(self._client, item.request)
-                if not item.future.done():
-                    item.future.set_result(result)
-            except Exception as exc:  # noqa: BLE001
-                if not item.future.done():
-                    item.future.set_exception(exc)
-            finally:
-                self._queue.task_done()
+        """Stop the service and cleanup resources."""
+        await self._pool.close()
+        logger.info('LLMService stopped')
 
     async def generate(self, request: GenerateRequest) -> GenerateResponse:
-        """Enqueue a generation request and await the result.
+        """Generate a response using the model pool.
 
-        Blocks if the queue is full until a slot becomes available.
+        Args:
+            request: Generation request with system prompt and messages.
+
+        Returns:
+            Generated response with text and token usage.
 
         Raises:
-            RuntimeError: If the service has not been started yet.
+            Exception: If Ollama client call fails.
+
         """
-        if self._worker_task is None or self._worker_task.done():
-            raise RuntimeError('LLMService is not running; call start() first')
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[GenerateResponse] = loop.create_future()
-        await self._queue.put(_QueueItem(request=request, future=future))
-        return await future
+        return await self._pool.generate(request)
