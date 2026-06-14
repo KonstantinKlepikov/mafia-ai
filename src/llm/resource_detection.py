@@ -1,8 +1,3 @@
-"""Hardware resource detection for LLM Pool optimization.
-
-Detects available GPU/CPU resources and calculates model capacity.
-"""
-
 import os
 import platform
 import subprocess
@@ -56,9 +51,7 @@ def _detect_nvidia_gpu() -> tuple[bool, int, int]:
         )
         if result.returncode == 0:
             lines = result.stdout.strip().split('\n')
-            vram_values = [
-                int(line.strip()) for line in lines if line.strip()
-            ]
+            vram_values = [int(line.strip()) for line in lines if line.strip()]
             if vram_values:
                 has_cuda = True
                 gpu_count = len(vram_values)
@@ -163,8 +156,7 @@ def calculate_pool_size(hardware: HardwareInfo, model_name: str) -> int:
         usable_vram = int(hardware.total_vram_mb * 0.8)
         pool_size = max(1, usable_vram // vram_per_model)
         logger.info(
-            f'GPU mode: usable VRAM {usable_vram} MB, '
-            f'estimated {pool_size} instances'
+            f'GPU mode: usable VRAM {usable_vram} MB, estimated {pool_size} instances'
         )
     else:
         # CPU mode: use RAM capacity
@@ -172,8 +164,7 @@ def calculate_pool_size(hardware: HardwareInfo, model_name: str) -> int:
         usable_ram = int(hardware.total_ram_mb * 0.6)
         pool_size = max(1, usable_ram // ram_per_model)
         logger.info(
-            f'CPU mode: usable RAM {usable_ram} MB, '
-            f'estimated {pool_size} instances'
+            f'CPU mode: usable RAM {usable_ram} MB, estimated {pool_size} instances'
         )
 
     # Cap at reasonable maximum (8 instances)

@@ -3,13 +3,13 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from services.mafia_service.llm.ollama_runner import OllamaRunner
-from services.mafia_service.llm.resource_detection import (
+from llm.ollama_runner import OllamaRunner
+from llm.resource_detection import (
     HardwareInfo,
     calculate_pool_size,
     detect_hardware,
 )
-from services.mafia_service.llm.schemas.llm_schemas import (
+from llm.schemas.llm_schemas import (
     GenerateRequest,
     MessageItem,
 )
@@ -164,7 +164,7 @@ class TestOllamaRunner:
         )
 
         # Mock subprocess execution - return GenerateResponse
-        from services.mafia_service.llm.schemas.llm_schemas import (
+        from llm.schemas.llm_schemas import (
             GenerateResponse,
             Usage,
         )
@@ -203,7 +203,7 @@ class TestOllamaRunner:
         )
 
         # Mock subprocess with JSON response
-        from services.mafia_service.llm.schemas.llm_schemas import (
+        from llm.schemas.llm_schemas import (
             GenerateResponse,
             Usage,
         )
@@ -239,7 +239,7 @@ class TestOllamaRunner:
         )
 
         # Mock subprocess
-        from services.mafia_service.llm.schemas.llm_schemas import (
+        from llm.schemas.llm_schemas import (
             GenerateResponse,
             Usage,
         )

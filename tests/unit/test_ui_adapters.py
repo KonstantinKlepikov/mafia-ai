@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from core.event_bus import EventBus, EventType
+from core.service import GameService
 from shared.models import (
     GamePhase,
     GameState,
@@ -11,10 +13,8 @@ from shared.models import (
     Message,
     VoteEvent,
 )
-from src.services.mafia_service.core.event_bus import EventBus, EventType
-from src.services.mafia_service.core.service import GameService
-from src.services.mafia_service.ui.event_adapter import EventAdapter
-from src.services.mafia_service.ui.service_adapter import (
+from ui.event_adapter import EventAdapter
+from ui.service_adapter import (
     GameServiceAdapter,
     GameServiceAdapterError,
 )

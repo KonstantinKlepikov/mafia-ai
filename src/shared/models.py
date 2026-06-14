@@ -1,9 +1,3 @@
-"""Shared Pydantic models for the mafia-ai project.
-
-Contains types for roles, phases, messages, vote events,
-game/agent state, and host-agent Q&A interaction.
-"""
-
 from enum import Enum
 
 from pydantic import BaseModel, Field

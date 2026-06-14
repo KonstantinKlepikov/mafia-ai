@@ -1,5 +1,3 @@
-"""Pydantic schemas for the LLM MCP API request and response."""
-
 from enum import StrEnum
 
 from pydantic import BaseModel, Field

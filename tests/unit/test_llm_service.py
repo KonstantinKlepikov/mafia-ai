@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from services.mafia_service.llm.schemas.llm_schemas import (
+from llm.schemas.llm_schemas import (
     GenerateRequest,
     GenerateResponse,
     MessageItem,

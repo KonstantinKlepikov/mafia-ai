@@ -1,7 +1,7 @@
 import asyncio
 
+from core.event_bus import EventBus, EventType
 from shared.models import GamePhase, Message
-from src.services.mafia_service.core.event_bus import EventBus, EventType
 
 
 class TestEventBus:

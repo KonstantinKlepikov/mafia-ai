@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-import services.mafia_service.core.service as svc_module
-from services.mafia_service.config import MafiaServiceSettings
-from services.mafia_service.core.service import GameService
-from services.mafia_service.llm.service import LLMService
+import core.service as svc_module
+from config import MafiaServiceSettings
+from core.service import GameService
+from llm.service import LLMService
 from shared.models import (
     GamePhase,
     HostDecision,
@@ -100,7 +100,7 @@ def mock_llm_service() -> AsyncMock:
     mock_service.stop = AsyncMock()
 
     # Mock generate response
-    from services.mafia_service.llm.schemas.llm_schemas import GenerateResponse, Usage
+    from llm.schemas.llm_schemas import GenerateResponse, Usage
 
     mock_response = GenerateResponse(
         text='Hello, I am a test agent!',

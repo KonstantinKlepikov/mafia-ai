@@ -1,8 +1,3 @@
-"""LLM service: OllamaRunner-based inference via subprocess.
-
-Replaces HTTP-based ModelPool with direct subprocess execution.
-"""
-
 from loguru import logger
 
 from ..config import MafiaServiceSettings

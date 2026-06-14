@@ -1,8 +1,3 @@
-"""Ollama subprocess runner for local model inference.
-
-Replaces HTTP-based ModelPool with direct subprocess execution.
-"""
-
 import asyncio
 import json
 import subprocess

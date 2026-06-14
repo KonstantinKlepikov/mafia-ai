@@ -112,26 +112,25 @@ mafia-ai/
 ├── config/
 │   └── prompts.yaml           # Persona definitions (10 characters)
 ├── src/
-│   ├── services/
-│   │   └── mafia_service/     # Unified monolithic service
-│   │       ├── core/
-│   │       │   ├── event_bus.py       # Internal pub/sub
-│   │       │   ├── service.py         # Game FSM + agents
-│   │       │   ├── agent_logic.py     # Agent behavior
-│   │       │   └── vote_resolver.py   # Voting logic
-│   │       ├── llm/
-│   │       │   ├── ollama_runner.py   # Subprocess execution
-│   │       │   ├── service.py         # LLM facade
-│   │       │   └── resource_detection.py  # GPU/CPU detection
-│   │       ├── ui/
-│   │       │   ├── main_app.py        # Flet application
-│   │       │   ├── service_adapter.py # Direct method calls
-│   │       │   └── event_adapter.py   # EventBus subscription
-│   │       ├── config.py      # MafiaServiceSettings
-│   │       └── main.py        # Application entrypoint
-│   └── shared/
-│       ├── models.py          # Pydantic models
-│       └── database.py        # SQLite async wrapper
+│   │
+│   ├── core/
+│   │    ├── event_bus.py       # Internal pub/sub
+│   │    ├── service.py         # Game FSM + agents
+│   │    ├── agent_logic.py     # Agent behavior
+│   │    └── vote_resolver.py   # Voting logic
+│   ├── llm/
+│   │    ├── ollama_runner.py   # Subprocess execution
+│   │    ├── service.py         # LLM facade
+│   │    └── resource_detection.py  # GPU/CPU detection
+│   ├── ui/
+│   │    ├── main_app.py        # Flet application
+│   │    ├── service_adapter.py # Direct method calls
+│   │    └── event_adapter.py   # EventBus subscription
+│   ├── shared/
+│   │    ├── models.py          # Pydantic models
+│   │    └── database.py        # SQLite async wrapper
+│   ├── config.py      # MafiaServiceSettings
+│   └── main.py        # Application entrypoint
 ├── tests/
 │   └── unit/                  # Unit tests (71 tests)
 └── infra/

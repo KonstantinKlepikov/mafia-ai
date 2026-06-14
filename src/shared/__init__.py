@@ -1,8 +1,3 @@
-"""Shared models package for mafia-ai.
-
-Expose common Pydantic models used across services.
-"""
-
 from .database import Database
 from .models import (
     AgentRole,
