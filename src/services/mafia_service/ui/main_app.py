@@ -1,4 +1,4 @@
-"""Main Flet application for Mafia-AI admin panel (integrated version)."""
+"""Main Flet application for Mafia-AI admin panel (unified version)."""
 
 import asyncio
 
@@ -7,39 +7,40 @@ from loguru import logger
 
 from shared.models import AgentAnswer, Message, VoteEvent
 
-from ..config import GameServiceSettings
+from ..config import AdminFletSettings, MafiaServiceSettings
 from ..core.event_bus import EventBus
 from ..core.service import GameService
-from ..ui_config import AdminFletSettings
-from .event_adapter import EventAdapter, EventKind
-from .service_adapter import GameServiceAdapter
+from ..llm.service import LLMService
 from .ask_agent_panel import AskAgentPanel
+from .event_adapter import EventAdapter, EventKind
 from .game_controls import GameControls
 from .host_decision_panel import HostDecisionPanel
 from .message_feed import MessageFeed
+from .service_adapter import GameServiceAdapter
 from .status_panel import StatusPanel
 
 
 class MafiaAdminApp:
-    """Mafia-AI admin panel application (integrated version).
+    """Mafia-AI admin panel application (unified version).
 
-    This version creates and manages GameService and EventBus directly.
+    This version creates and manages LLMService, GameService and EventBus directly.
 
     Args:
-        game_settings: Game service configuration.
+        game_settings: Unified service configuration.
         ui_settings: UI configuration settings.
 
     """
 
     def __init__(
         self,
-        game_settings: GameServiceSettings,
+        game_settings: MafiaServiceSettings,
         ui_settings: AdminFletSettings,
     ) -> None:
         self._game_settings = game_settings
         self._ui_settings = ui_settings
 
         # Initialized in start()
+        self._llm_service: LLMService | None = None
         self._event_bus: EventBus | None = None
         self._game_service: GameService | None = None
         self._client: GameServiceAdapter | None = None
@@ -63,9 +64,16 @@ class MafiaAdminApp:
         page.width = self._ui_settings.window_width
         page.height = self._ui_settings.window_height
 
+        # Create LLMService
+        self._llm_service = LLMService(self._game_settings)
+        await self._llm_service.start()
+        logger.info('LLMService started successfully')
+
         # Create EventBus and GameService
         self._event_bus = EventBus()
-        self._game_service = GameService(self._game_settings, event_bus=self._event_bus)
+        self._game_service = GameService(
+            self._game_settings, self._llm_service, event_bus=self._event_bus
+        )
 
         # Start GameService
         try:
@@ -163,6 +171,9 @@ class MafiaAdminApp:
         if self._game_service:
             await self._game_service.stop()
             logger.info('GameService stopped')
+        if self._llm_service:
+            await self._llm_service.stop()
+            logger.info('LLMService stopped')
         logger.info('MafiaAdminApp stopped')
 
     async def _update_loop(self) -> None:

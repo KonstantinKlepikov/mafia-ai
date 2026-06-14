@@ -4,49 +4,55 @@ AI-powered Mafia game with autonomous agents.
 
 ## 🏗️ Architecture
 
-**Integrated architecture**:
+**Monolithic architecture with embedded LLM**:
 
 ```text
-┌─────────────────────────────────────────┐     ┌─────────────┐
-│     Game Service (Unified)              │     │    LLM      │
-│   ┌──────────┐    ┌────────────────┐    │────▶│   Pool      │
-│   │  Flet UI │    │ FSM + Agents   │    │ HTTP│             │
-│   │ (Thread) │◀──▶│ (EventBus)     │    │     └─────────────┘
-│   └──────────┘    └────────────────┘    │           │ HTTP
-│                                         │           ▼
-└─────────────────────────────────────────┘     ┌─────────────┐
-                                                │   Ollama    │
-                                                │   Runtime   │
-                                                └─────────────┘
+┌─────────────────────────────────────────────────────────┐
+│         Mafia-AI Service (Monolithic)                   │
+│                                                         │
+│   ┌──────────┐    ┌────────────────┐     ┌────────────┐ │
+│   │  Flet UI │    │ FSM + Agents   │     │  Ollama    │ │
+│   │ (Thread) │◀──▶│ (EventBus)     │────▶│ Subprocess │ │
+│   └──────────┘    └────────────────┘     └────────────┘ │
+│                          │                              │
+│                          ▼                              │
+│                   ┌──────────────┐                      │
+│                   │  LLMService  │                      │
+│                   │ (Direct Call)│                      │
+│                   └──────────────┘                      │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### Core Services
+### Core Components
 
-- **Game Service** — Unified service combining game orchestration, agent management, and admin UI:
+- **Mafia-AI Service** — Single monolithic service with all functionality:
     - **FSM Engine** — Game state machine handling phases (day/night/voting)
     - **Agent Manager** — Embedded AI agents with direct async communication
     - **EventBus** — Internal pub/sub for UI synchronization (MESSAGE, VOTE, ANSWER, STATE_CHANGE events)
-    - **Flet UI** — Integrated admin interface running in daemon thread (port 8550)
-    - **FastAPI** — REST API for external integrations (port 8081)
-- **LLM Pool** — Parallel LLM inference with round-robin load balancing
-- **SQLite (in-memory)** — Persona storage
+    - **Flet UI** — Integrated admin interface (port 8550, exposed as 38550)
+    - **LLMService** — Direct in-process LLM inference management
+    - **OllamaRunner** — Subprocess-based Ollama CLI execution with concurrency control
+- **SQLite** — Persona storage with aiosqlite
 
 ### Key Architecture Principles
 
-**Monolithic Design**:
+**Monolithic Design with Embedded LLM**:
 
-- Single service with embedded UI and business logic
-- Direct method calls instead of HTTP/RabbitMQ for UI communication
+- Single service with embedded UI, game logic, and LLM inference
+- Ollama binary runs as subprocess, not separate container
+- Direct Python imports instead of HTTP communication
 - EventBus for internal event propagation
 - Separate daemon thread for Flet UI (non-blocking)
 
 **Benefits**:
 
-- ⚡ Zero network overhead for UI operations (direct method calls)
-- 🔄 Simplified deployment (single container)
-- 💾 Lighter dependencies (no separate UI service)
-- 🎯 Better resource utilization (shared event loop)
-- 🧪 Easier testing (in-process communication)
+- ⚡ Zero network overhead (direct method calls, no HTTP serialization)
+- 🔄 Simplified deployment (single container, one Docker Compose service)
+- 💾 Minimal dependencies (no httpx, fastapi, uvicorn, ollama SDK)
+- 🎯 Better resource utilization (shared event loop, subprocess pool)
+- 🧪 Easier testing (in-process communication, no mocking HTTP clients)
+- 🚀 Lower latency (subprocess vs HTTP roundtrip)
 
 ## 🚀 Build & Run
 
@@ -86,15 +92,18 @@ make down
 make check
 ```
 
-### Service Restart Example
+### Service Management
 
 ```bash
-docker compose -f infra/docker-compose.yml restart mafia-ai-game-service
+# Restart service
+docker compose -f infra/docker-compose.yml restart mafia-ai-service
+
+# View logs
+docker compose -f infra/docker-compose.yml logs -f mafia-ai-service
+
+# Rebuild after code changes
+make serve  # or: docker compose -f infra/docker-compose.yml up --build
 ```
-
-### Access Points
-
-- **Admin UI**: http://localhost:38550 (Flet web interface)
 
 ## 📁 Project Structure
 
@@ -104,64 +113,85 @@ mafia-ai/
 │   └── prompts.yaml           # Persona definitions (10 characters)
 ├── src/
 │   ├── services/
-│   │   ├── game_service/      # Unified game + UI service (FastAPI + Flet)
-│   │   │   ├── core/
-│   │   │   │   ├── event_bus.py       # Internal pub/sub
-│   │   │   │   ├── service.py         # Game FSM + agents
-│   │   │   │   └── agent_logic.py     # Agent behavior
-│   │   │   ├── ui/
-│   │   │   │   ├── service_adapter.py # Direct method calls
-│   │   │   │   └── event_adapter.py   # EventBus subscription
-│   │   │   └── main_app.py    # Integrated Flet UI
-│   │   ├── llm/               # LLM pool manager
+│   │   └── mafia_service/     # Unified monolithic service
+│   │       ├── core/
+│   │       │   ├── event_bus.py       # Internal pub/sub
+│   │       │   ├── service.py         # Game FSM + agents
+│   │       │   ├── agent_logic.py     # Agent behavior
+│   │       │   └── vote_resolver.py   # Voting logic
+│   │       ├── llm/
+│   │       │   ├── ollama_runner.py   # Subprocess execution
+│   │       │   ├── service.py         # LLM facade
+│   │       │   └── resource_detection.py  # GPU/CPU detection
+│   │       ├── ui/
+│   │       │   ├── main_app.py        # Flet application
+│   │       │   ├── service_adapter.py # Direct method calls
+│   │       │   └── event_adapter.py   # EventBus subscription
+│   │       ├── config.py      # MafiaServiceSettings
+│   │       └── main.py        # Application entrypoint
 │   └── shared/
 │       ├── models.py          # Pydantic models
 │       └── database.py        # SQLite async wrapper
 ├── tests/
-│   └── unit/                  # Unit tests (83 tests)
+│   └── unit/                  # Unit tests (71 tests)
 └── infra/
-    ├── docker-compose.yml     # Service definitions
-    ├── llm/                   # LLM service Dockerfile
-    └── game_service/          # Admin Dockerfile
+    ├── docker-compose.yml     # Single service definition
+    └── mafia_service/         # Unified service Dockerfile
+        ├── Dockerfile
+        └── entrypoint.sh      # Ollama model preload
 ```
 
 ## 🧪 Testing
 
 ```bash
-# Run all unit tests
+# Run all unit tests (71 tests)
 poetry run pytest tests/unit/ -v
 
 # Run specific test file
-poetry run pytest tests/unit/test_database.py -v
+poetry run pytest tests/unit/test_ollama_runner.py -v
 
 # Run with coverage
 poetry run pytest tests/unit/ --cov=src --cov-report=html
 ```
 
-## 🌐 Endpoints
+### Test Coverage
 
-### Services
+- `test_database.py` — 7 tests for SQLite operations
+- `test_event_bus.py` — 15 tests for pub/sub system
+- `test_game_service.py` — 36 tests for FSM and agent management
+- `test_llm_service.py` — 9 tests for LLM schemas
+- `test_ollama_runner.py` — 10 tests for subprocess execution and resource detection
+- `test_shared_models.py` — 8 tests for Pydantic models
+- `test_ui_adapters.py` — 10 tests for UI adapters
 
-- **[LLM Service](http://localhost:38080)**:
-- **[Admin-flet](http://localhost:38550)**
+## 🌐 Access Points
+
+- **Admin UI**: http://localhost:38550 — Flet web interface for game management
 
 ## 📊 Configuration
 
 ### Environment Variables
 
-Key environment variables (see `infra/.env.example`):
+Key environment variables (see `infra/.env`):
 
 ```bash
-# LLM Settings
-OLLAMA_URL=http://mafia-ai-ollama:11434
-OLLAMA_MODEL=llama3.1:8b
+# Ollama Settings
+OLLAMA_MODEL=smollm2:135m
+OLLAMA_BINARY_PATH=ollama
+OLLAMA_TIMEOUT=120
 LLM_POOL_SIZE=0  # 0 = auto-detect based on GPU/CPU
 
 # Game Settings
 AGENT_COUNT=10
-MAFIA_COUNT=2
-PHASE_DURATION_SECONDS=300
-VOTE_TIMEOUT_SECONDS=60
+MAFIA_COUNT=3
+PHASE_DURATION_SECONDS=60
+VOTE_TIMEOUT_SECONDS=30
+MESSAGE_MAX_TOKENS=150
+VOTE_MAX_TOKENS=50
+
+# UI Settings
+UI_ENABLED=true
+UI_PORT=8550  # Exposed as 38550 externally
 ```
 
 ### Persona Configuration

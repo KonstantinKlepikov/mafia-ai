@@ -3,7 +3,6 @@ import random
 import uuid
 from collections.abc import AsyncGenerator
 
-import httpx
 from loguru import logger
 
 from shared.database import Database
@@ -22,7 +21,8 @@ from shared.models import (
     VoteEvent,
 )
 
-from ..config import GameServiceSettings
+from ..config import MafiaServiceSettings
+from ..llm.service import LLMService
 from .agent_logic import AgentLogic
 from .event_bus import EventBus, EventType
 from .vote_resolver import resolve_votes
@@ -32,15 +32,14 @@ class AgentManager:
     """Manages all AI agents in a single process.
 
     Args:
-        llm_url: Base URL of the LLM service (e.g. 'http://llm:8080').
+        llm_service: LLM service for direct local inference.
         db: Database instance with personas and state storage.
 
     """
 
-    def __init__(self, llm_url: str, db: Database) -> None:
-        self._llm_url = llm_url
+    def __init__(self, llm_service: LLMService, db: Database) -> None:
+        self._llm_service = llm_service
         self._db = db
-        self._llm_client = httpx.AsyncClient(base_url=llm_url, timeout=60.0)
         self._agents: dict[str, AgentLogic] = {}
 
     async def initialize_agent(
@@ -59,7 +58,7 @@ class AgentManager:
         agent_logic = AgentLogic(
             agent_id=agent_id,
             persona=system_prompt,
-            llm_client=self._llm_client,
+            llm_service=self._llm_service,
             db=self._db,
         )
         self._agents[agent_id] = agent_logic
@@ -113,8 +112,7 @@ class AgentManager:
         return await agent.answer_question(question_text)
 
     async def close(self) -> None:
-        """Close HTTP client and cleanup resources."""
-        await self._llm_client.aclose()
+        """Cleanup resources (no HTTP client to close)."""
         logger.info('AgentManager closed')
 
 
@@ -129,16 +127,22 @@ class GameService:
     → (next NIGHT | GAME_OVER)
 
     Args:
-        settings: Populated GameServiceSettings instance.
+        settings: Populated MafiaServiceSettings instance.
+        llm_service: LLM service for direct local inference.
+        event_bus: Optional event bus for UI notifications.
 
     """
 
     def __init__(
-        self, settings: GameServiceSettings, event_bus: EventBus | None = None
+        self,
+        settings: MafiaServiceSettings,
+        llm_service: LLMService,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._settings = settings
         self._db = Database()
-        self._agent_manager = AgentManager(settings.llm_url, self._db)
+        self._llm_service = llm_service
+        self._agent_manager = AgentManager(llm_service, self._db)
         self._event_bus = event_bus or EventBus()
 
         # Game state
@@ -178,6 +182,7 @@ class GameService:
         if self._game_task is not None and not self._game_task.done():
             self._game_task.cancel()
         await self._agent_manager.close()
+        await self._llm_service.stop()
         await self._db.close()
         logger.info('GameService stopped')
 

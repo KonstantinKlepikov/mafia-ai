@@ -1,11 +1,16 @@
+"""Unified configuration for the Mafia AI service."""
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class GameServiceSettings(BaseSettings):
-    """Game Service settings - unified orchestrator and agent manager.
+class MafiaServiceSettings(BaseSettings):
+    """Unified Mafia service settings - combines LLM and Game settings.
 
     Attrs:
-        llm_url: Base URL for the LLM service (MCP-compatible).
+        ollama_binary_path: Path to ollama binary (default: 'ollama' from PATH).
+        ollama_model: Name of the model to use for generation.
+        ollama_timeout: Timeout in seconds for each ollama subprocess call.
+        llm_pool_size: Number of parallel model instances (0 = auto-detect).
         agent_count: Total number of agents in the game.
         mafia_count: Number of mafia agents to assign.
         phase_duration_seconds: Max duration per NIGHT / DAY speaking phase.
@@ -19,11 +24,15 @@ class GameServiceSettings(BaseSettings):
 
     """
 
-    llm_url: str
+    # LLM settings (formerly from LLMSettings)
+    ollama_binary_path: str = 'ollama'
+    ollama_model: str = 'llama3.1:8b'
+    ollama_timeout: int = 120
+    llm_pool_size: int = 0
 
+    # Game settings (formerly from GameServiceSettings)
     agent_count: int
     mafia_count: int
-
     phase_duration_seconds: int
     vote_timeout_seconds: int
 
@@ -35,5 +44,15 @@ class GameServiceSettings(BaseSettings):
     ui_enabled: bool = True
     ui_port: int = 8550
     poll_interval_seconds: float = 2.0
+
+    model_config = SettingsConfigDict(env_prefix='', extra='ignore')
+
+
+class AdminFletSettings(BaseSettings):
+    """Settings for the Flet admin panel."""
+
+    poll_interval_seconds: float = 2.0
+    window_width: int = 1400
+    window_height: int = 900
 
     model_config = SettingsConfigDict(env_prefix='', extra='ignore')

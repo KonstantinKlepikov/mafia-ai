@@ -1,6 +1,5 @@
 import random
 
-import httpx
 from loguru import logger
 
 from shared.database import Database
@@ -12,6 +11,9 @@ from shared.models import (
     TargetAudience,
 )
 
+from ..llm.schemas.llm_schemas import GenerateRequest, MessageItem, MessageRole
+from ..llm.service import LLMService
+
 
 class AgentLogic:
     """Logic for a single AI agent.
@@ -22,7 +24,7 @@ class AgentLogic:
     Args:
         agent_id: Unique agent identifier (e.g. 'agent-1').
         persona: SystemPrompt with character details.
-        llm_client: HTTP client for LLM service.
+        llm_service: LLM service for direct local inference.
         db: Database instance for state persistence.
 
     """
@@ -31,12 +33,12 @@ class AgentLogic:
         self,
         agent_id: str,
         persona: SystemPrompt,
-        llm_client: httpx.AsyncClient,
+        llm_service: LLMService,
         db: Database,
     ) -> None:
         self._agent_id = agent_id
         self._persona = persona
-        self._llm_client = llm_client
+        self._llm_service = llm_service
         self._db = db
 
     async def generate_message(self, phase: GamePhase, game_round: int) -> str:
@@ -186,7 +188,7 @@ class AgentLogic:
         )
 
     async def _generate_llm_response(self, extra_user_msg: str, max_tokens: int) -> str:
-        """Build context from history and call the LLM MCP API.
+        """Build context from history and call the LLM service.
 
         Args:
             extra_user_msg: Instruction appended as the final user turn.
@@ -196,33 +198,34 @@ class AgentLogic:
             Generated text from the LLM.
 
         Raises:
-            httpx.HTTPStatusError: On non-2xx response from the LLM service.
+            RuntimeError: On LLM generation failure.
 
         """
         state = await self._db.get_agent_state(self._agent_id)
         if state is None:
             raise ValueError(f'Agent {self._agent_id} not initialized')
 
-        history: list[dict[str, str]] = []
+        messages: list[MessageItem] = []
         for msg in state.message_history:
             if msg.sender_id == self._agent_id:
-                history.append({'role': 'assistant', 'content': msg.content})
+                messages.append(
+                    MessageItem(role=MessageRole.ASSISTANT, content=msg.content)
+                )
             else:
-                history.append(
-                    {
-                        'role': 'user',
-                        'content': f'[{msg.sender_id}]: {msg.content}',
-                    }
+                messages.append(
+                    MessageItem(
+                        role=MessageRole.USER,
+                        content=f'[{msg.sender_id}]: {msg.content}',
+                    )
                 )
 
-        history.append({'role': 'user', 'content': extra_user_msg})
+        messages.append(MessageItem(role=MessageRole.USER, content=extra_user_msg))
 
-        payload = {
-            'system_prompt': self._persona.prompt,
-            'messages': history,
-            'max_tokens': max_tokens,
-        }
+        request = GenerateRequest(
+            system_prompt=self._persona.prompt,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
 
-        response = await self._llm_client.post('/mcp/generate', json=payload)
-        response.raise_for_status()
-        return response.json()['text']
+        response = await self._llm_service.generate(request)
+        return response.text

@@ -1,13 +1,13 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock
 
-import httpx
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-import services.game_service.core.service as svc_module
-from services.game_service.config import GameServiceSettings
-from services.game_service.core.service import GameService
+import services.mafia_service.core.service as svc_module
+from services.mafia_service.config import MafiaServiceSettings
+from services.mafia_service.core.service import GameService
+from services.mafia_service.llm.service import LLMService
 from shared.models import (
     GamePhase,
     HostDecision,
@@ -20,9 +20,12 @@ from shared.models import (
 )
 
 
-def _make_settings(**kwargs: object) -> GameServiceSettings:
+def _make_settings(**kwargs: object) -> MafiaServiceSettings:
     defaults: dict[str, object] = dict(
-        llm_url='http://llm:8080',
+        ollama_binary_path='ollama',
+        ollama_model='llama3.1:8b',
+        ollama_timeout=120,
+        llm_pool_size=2,
         agent_count=4,
         mafia_count=1,
         phase_duration_seconds=10,
@@ -30,9 +33,10 @@ def _make_settings(**kwargs: object) -> GameServiceSettings:
         db_yaml_path='/app/config/prompts.yaml',
         message_max_tokens=150,
         vote_max_tokens=50,
+        ui_enabled=False,
     )
     defaults.update(kwargs)
-    return GameServiceSettings(**defaults)  # type: ignore[arg-type]
+    return MafiaServiceSettings(**defaults)  # type: ignore[arg-type]
 
 
 def _make_persona(n: int) -> SystemPrompt:
@@ -74,8 +78,8 @@ def _make_vote(
 
 
 @pytest.fixture
-def settings() -> GameServiceSettings:
-    """GameServiceSettings for unit tests."""
+def settings() -> MafiaServiceSettings:
+    """MafiaServiceSettings for unit tests."""
     return _make_settings()
 
 
@@ -89,32 +93,33 @@ def mock_database() -> AsyncMock:
 
 
 @pytest.fixture
-def mock_llm_client() -> httpx.AsyncClient:
-    """Mocked httpx AsyncClient for LLM service."""
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
-    mock_response = Mock()
-    mock_response.json.return_value = {'text': 'Hello, I am a test agent!'}
-    mock_response.raise_for_status = Mock()
-    mock_client.post.return_value = mock_response
-    return mock_client
+def mock_llm_service() -> AsyncMock:
+    """Mocked LLMService for testing."""
+    mock_service = AsyncMock(spec=LLMService)
+    mock_service.start = AsyncMock()
+    mock_service.stop = AsyncMock()
+
+    # Mock generate response
+    from services.mafia_service.llm.schemas.llm_schemas import GenerateResponse, Usage
+
+    mock_response = GenerateResponse(
+        text='Hello, I am a test agent!',
+        usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+    mock_service.generate = AsyncMock(return_value=mock_response)
+    return mock_service
 
 
 @pytest.fixture
 def svc(
-    settings: GameServiceSettings,
+    settings: MafiaServiceSettings,
     mock_database: AsyncMock,
-    mock_llm_client: httpx.AsyncClient,
+    mock_llm_service: AsyncMock,
     monkeypatch: MonkeyPatch,
 ) -> GameService:
     """GameService with all external dependencies mocked."""
     monkeypatch.setattr(svc_module, 'Database', MagicMock(return_value=mock_database))
-
-    # Mock httpx.AsyncClient inside AgentManager
-    def mock_async_client(*args, **kwargs):  # type: ignore[no-untyped-def]
-        return mock_llm_client
-
-    monkeypatch.setattr(svc_module.httpx, 'AsyncClient', mock_async_client)
-    return GameService(settings)
+    return GameService(settings, llm_service=mock_llm_service)
 
 
 async def _cancel_task(task: asyncio.Task) -> None:  # type: ignore[type-arg]
@@ -330,9 +335,9 @@ class TestGameServiceEventBusIntegration:
     @pytest.fixture
     def svc_with_event_bus(
         self,
-        settings: GameServiceSettings,
+        settings: MafiaServiceSettings,
         mock_database: AsyncMock,
-        mock_llm_client: httpx.AsyncClient,
+        mock_llm_service: AsyncMock,
         monkeypatch: MonkeyPatch,
     ) -> tuple[GameService, MagicMock]:
         """GameService with EventBus and mocked dependencies."""
@@ -340,17 +345,14 @@ class TestGameServiceEventBusIntegration:
             svc_module, 'Database', MagicMock(return_value=mock_database)
         )
 
-        def mock_async_client(*args, **kwargs):  # type: ignore[no-untyped-def]
-            return mock_llm_client
-
-        monkeypatch.setattr(svc_module.httpx, 'AsyncClient', mock_async_client)
-
         # Create EventBus mock
         mock_event_bus = MagicMock()
         mock_event_bus.publish = Mock()
         mock_event_bus.publish_async = AsyncMock()
 
-        service = GameService(settings, event_bus=mock_event_bus)
+        service = GameService(
+            settings, llm_service=mock_llm_service, event_bus=mock_event_bus
+        )
         return service, mock_event_bus
 
     async def test_publishes_message_events(

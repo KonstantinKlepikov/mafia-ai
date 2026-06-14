@@ -11,10 +11,10 @@ from shared.models import (
     Message,
     VoteEvent,
 )
-from src.services.game_service.core.event_bus import EventBus, EventType
-from src.services.game_service.core.service import GameService
-from src.services.game_service.ui.event_adapter import EventAdapter
-from src.services.game_service.ui.service_adapter import (
+from src.services.mafia_service.core.event_bus import EventBus, EventType
+from src.services.mafia_service.core.service import GameService
+from src.services.mafia_service.ui.event_adapter import EventAdapter
+from src.services.mafia_service.ui.service_adapter import (
     GameServiceAdapter,
     GameServiceAdapterError,
 )

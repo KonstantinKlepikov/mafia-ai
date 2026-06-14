@@ -1,87 +1,40 @@
 services:
-  mafia-ai-ollama:
-    env_file:
-      - .env
-    build:
-      context: ./ollama
-      dockerfile: Dockerfile
-    ports:
-      - "31434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
-    networks:
-      - game_net
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
-
-  mafia-ai-llm:
-    env_file:
-      - .env
+  mafia-ai-service:
     build:
       context: ..
-      dockerfile: infra/llm/Dockerfile
-    ports:
-      - "38080:8080"
-    environment:
-      - OLLAMA_URL=${OLLAMA_URL?Variable not set}
-      - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
-      - LLM_QUEUE_MAX_SIZE=${LLM_QUEUE_MAX_SIZE?Variable not set}
-      - LLM_POOL_SIZE=${LLM_POOL_SIZE:-0}
-    depends_on:
-      mafia-ai-ollama:
-        condition: service_healthy
-    networks:
-      - game_net
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/docs"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  mafia-ai-game-service:
-    build:
-      context: ..
-      dockerfile: infra/game_service/Dockerfile
-    container_name: mafia-ai-game-service
+      dockerfile: infra/mafia_service/Dockerfile
+    container_name: mafia-ai-service
     env_file:
       - .env
     ports:
       - "38550:8550"
     environment:
-      - LLM_URL=${LLM_URL?Variable not set}
+      # Ollama settings
+      - OLLAMA_BINARY_PATH=ollama
+      - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-120}
+      - LLM_POOL_SIZE=${LLM_POOL_SIZE:-0}
+      # Game settings
       - AGENT_COUNT=${AGENT_COUNT?Variable not set}
       - MAFIA_COUNT=${MAFIA_COUNT?Variable not set}
       - PHASE_DURATION_SECONDS=${PHASE_DURATION_SECONDS?Variable not set}
       - VOTE_TIMEOUT_SECONDS=${VOTE_TIMEOUT_SECONDS?Variable not set}
       - MESSAGE_MAX_TOKENS=${MESSAGE_MAX_TOKENS?Variable not set}
       - VOTE_MAX_TOKENS=${VOTE_MAX_TOKENS?Variable not set}
+      # UI settings
       - UI_ENABLED=${UI_ENABLED:-true}
       - UI_PORT=8550
       - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-2.0}
     volumes:
       - ${PWD}/config:/app/config:ro
-    networks:
-      - game_net
-    depends_on:
-      mafia-ai-llm:
-        condition: service_healthy
+      - ollama_models:/root/.ollama
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "8550"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-networks:
-  game_net:
-    driver: bridge
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
 volumes:
-  ollama_data:
+  ollama_models:
+
