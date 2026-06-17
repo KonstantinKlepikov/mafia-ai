@@ -1,7 +1,7 @@
 """Internal event bus for game service events.
 
 This module provides a simple publish-subscribe mechanism for internal
-communication between GameService and UI components, replacing RabbitMQ
+communication between Game and UI components, replacing RabbitMQ
 for local event distribution.
 """
 

@@ -28,12 +28,11 @@ ENV PATH="/root/.local/bin:$PATH"
 # Copy Poetry configuration
 COPY pyproject.toml poetry.lock poetry.toml ./
 
-# Install Python dependencies (without httpx and ollama Python SDK)
-RUN POETRY_VIRTUALENVS_CREATE=false poetry install --no-root --no-interaction
+# Install Python dependencies
+RUN POETRY_VIRTUALENVS_CREATE=false poetry install --no-root --no-interaction --only main
 
 # Copy source code
-COPY src/shared ./shared
-COPY src/services/mafia_service ./mafia_service
+COPY src/ .
 COPY config ./config
 
 ENV PYTHONPATH=/app

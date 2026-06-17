@@ -1,5 +1,3 @@
-"""Status panel UI component."""
-
 import flet as ft
 
 from shared.models import AgentInfo, GameState

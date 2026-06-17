@@ -17,7 +17,7 @@ AI-powered Mafia game with autonomous agents.
 │                          │                              │
 │                          ▼                              │
 │                   ┌──────────────┐                      │
-│                   │  LLMService  │                      │
+│                   │  LLM         │                      │
 │                   │ (Direct Call)│                      │
 │                   └──────────────┘                      │
 │                                                         │
@@ -31,7 +31,7 @@ AI-powered Mafia game with autonomous agents.
     - **Agent Manager** — Embedded AI agents with direct async communication
     - **EventBus** — Internal pub/sub for UI synchronization (MESSAGE, VOTE, ANSWER, STATE_CHANGE events)
     - **Flet UI** — Integrated admin interface (port 8550, exposed as 38550)
-    - **LLMService** — Direct in-process LLM inference management
+    - **LLM** — Direct in-process LLM inference management
     - **OllamaRunner** — Subprocess-based Ollama CLI execution with concurrency control
 - **SQLite** — Persona storage with aiosqlite
 
@@ -157,7 +157,7 @@ poetry run pytest tests/unit/ --cov=src --cov-report=html
 
 - `test_database.py` — 7 tests for SQLite operations
 - `test_event_bus.py` — 15 tests for pub/sub system
-- `test_game_service.py` — 36 tests for FSM and agent management
+- `test_game.py` — 36 tests for FSM and agent management
 - `test_llm_service.py` — 9 tests for LLM schemas
 - `test_ollama_runner.py` — 10 tests for subprocess execution and resource detection
 - `test_shared_models.py` — 8 tests for Pydantic models
@@ -165,7 +165,7 @@ poetry run pytest tests/unit/ --cov=src --cov-report=html
 
 ## 🌐 Access Points
 
-- **Admin UI**: http://localhost:38550 — Flet web interface for game management
+- **[Admin UI](http://localhost:38550)** — Flet web interface for game management
 
 ## 📊 Configuration
 
@@ -190,7 +190,6 @@ VOTE_MAX_TOKENS=50
 
 # UI Settings
 UI_ENABLED=true
-UI_PORT=8550  # Exposed as 38550 externally
 ```
 
 ### Persona Configuration

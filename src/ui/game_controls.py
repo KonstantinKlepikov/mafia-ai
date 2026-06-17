@@ -1,8 +1,8 @@
-"""Game control panel UI component."""
-
 import flet as ft
+from dependency_injector.wiring import Provide, inject
 
-from .service_adapter import GameServiceAdapter, GameServiceAdapterError
+from core.service import Game
+from di_containers import Container
 
 
 class GameControls:
@@ -14,10 +14,8 @@ class GameControls:
 
     def __init__(
         self,
-        client: GameServiceAdapter,
         on_game_started,  # type: ignore[no-untyped-def]
     ) -> None:
-        self._client = client
         self._on_game_started = on_game_started
         self._event_log: list[str] = []
         self._log_view = ft.ListView(
@@ -49,10 +47,15 @@ class GameControls:
             expand=True,
         )
 
-    async def _handle_start_game(self, e: ft.ControlEvent) -> None:
-        """Handle start game button click."""
+    @inject
+    async def _handle_start_game(
+        self,
+        e: ft.ControlEvent,
+        game: Game = Provide[Container.game],
+    ) -> None:
+        """Handle start game button click to begin a game."""
         try:
-            await self._client.start_game()
+            await game.begin_game()
             self.add_log_entry('Game started')
             await self._on_game_started()
             if e.page:
@@ -62,11 +65,11 @@ class GameControls:
                         bgcolor=ft.Colors.GREEN,
                     )
                 )
-        except GameServiceAdapterError as exc:
+        except Exception as exc:
             if e.page:
                 e.page.show_dialog(
                     ft.SnackBar(
-                        content=ft.Text(f'Error: {exc}'),
+                        content=ft.Text(f'Error: {exc.__str__()}'),
                         bgcolor=ft.Colors.RED,
                     )
                 )

@@ -10,21 +10,19 @@ services:
       - "38550:8550"
     environment:
       # Ollama settings
-      - OLLAMA_BINARY_PATH=ollama
       - OLLAMA_MODEL=${OLLAMA_MODEL?Variable not set}
       - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-120}
       - LLM_POOL_SIZE=${LLM_POOL_SIZE:-0}
       # Game settings
-      - AGENT_COUNT=${AGENT_COUNT?Variable not set}
-      - MAFIA_COUNT=${MAFIA_COUNT?Variable not set}
-      - PHASE_DURATION_SECONDS=${PHASE_DURATION_SECONDS?Variable not set}
-      - VOTE_TIMEOUT_SECONDS=${VOTE_TIMEOUT_SECONDS?Variable not set}
-      - MESSAGE_MAX_TOKENS=${MESSAGE_MAX_TOKENS?Variable not set}
-      - VOTE_MAX_TOKENS=${VOTE_MAX_TOKENS?Variable not set}
+      - AGENT_COUNT=${AGENT_COUNT:-10}
+      - MAFIA_COUNT=${MAFIA_COUNT:-3}
+      - PHASE_DURATION_SECONDS=${PHASE_DURATION_SECONDS:-180}
+      - VOTE_TIMEOUT_SECONDS=${VOTE_TIMEOUT_SECONDS:-60}
+      - MESSAGE_MAX_TOKENS=${MESSAGE_MAX_TOKENS:-150}
+      - VOTE_MAX_TOKENS=${VOTE_MAX_TOKENS:-50}
       # UI settings
       - UI_ENABLED=${UI_ENABLED:-true}
-      - UI_PORT=8550
-      - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-2.0}
+      - UI_PORT=${UI_PORT:-8550}
     volumes:
       - ${PWD}/config:/app/config:ro
       - ollama_models:/root/.ollama

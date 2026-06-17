@@ -1,23 +1,12 @@
-"""Main entry point for unified Mafia-AI Service.
-
-Runs Flet UI application with integrated LLMService and GameService.
-"""
-
 import flet as ft
 from loguru import logger
 
-from .config import AdminFletSettings, MafiaServiceSettings
-from .ui.main_app import MafiaAdminApp
+from ui.main_app import MafiaAdminApp
 
 
 def main() -> None:
     """Start the Flet UI application with unified service."""
-    settings = MafiaServiceSettings()
-    ui_settings = AdminFletSettings(
-        poll_interval_seconds=settings.poll_interval_seconds,
-    )
-
-    app = MafiaAdminApp(settings, ui_settings)
+    app = MafiaAdminApp()
 
     async def flet_main(page: ft.Page) -> None:
         """Flet application entry point."""
@@ -26,14 +15,13 @@ def main() -> None:
             # Keep the page alive
             page.on_disconnect = lambda _: None
         except Exception as exc:
-            logger.error(f'Failed to start MafiaAdminApp: {exc}')
+            logger.error(f'Failed to start MafiaAdminApp: {exc.__str__()}')
             raise
 
-    logger.info(f'Starting unified Mafia-AI service on port {settings.ui_port}')
     ft.app(
         target=flet_main,
         view=ft.AppView.WEB_BROWSER,
-        port=settings.ui_port,
+        port=8550,
     )
 
 

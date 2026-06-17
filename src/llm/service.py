@@ -1,12 +1,13 @@
 from loguru import logger
 
-from ..config import MafiaServiceSettings
+from config import MafiaServiceSettings
+
 from .ollama_runner import OllamaRunner
 from .resource_detection import calculate_pool_size, detect_hardware
 from .schemas.llm_schemas import GenerateRequest, GenerateResponse
 
 
-class LLMService:
+class LLM:
     """Local Ollama inference via subprocess.
 
     Uses OllamaRunner for direct model execution without HTTP overhead.
@@ -21,7 +22,7 @@ class LLMService:
         """
         # Auto-detect pool size if not specified
         pool_size = settings.llm_pool_size
-        if pool_size is None or pool_size == 0:
+        if pool_size == 0:
             hardware = detect_hardware()
             pool_size = calculate_pool_size(hardware, settings.ollama_model)
             logger.info(f'Auto-detected pool size: {pool_size}')
@@ -36,13 +37,17 @@ class LLMService:
         )
 
     async def start(self) -> None:
-        """Start the service (no-op for subprocess implementation)."""
-        logger.info('LLMService started with OllamaRunner')
+        """Start the service (no-op for subprocess implementation).
+
+        TODO: make me
+
+        """
+        logger.info('LLM started with OllamaRunner')
 
     async def stop(self) -> None:
         """Stop the service and cleanup resources."""
         await self._runner.close()
-        logger.info('LLMService stopped')
+        logger.info('LLM stopped')
 
     async def generate(self, request: GenerateRequest) -> GenerateResponse:
         """Generate a response using OllamaRunner subprocess.

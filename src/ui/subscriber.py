@@ -1,18 +1,11 @@
-"""Adapter for EventBus subscription from UI components.
-
-This module replaces AsyncSubscriber by providing event buffering
-from EventBus instead of RabbitMQ.
-"""
-
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 
 from loguru import logger
 
+from core.event_bus import EventBus, EventType
 from shared.models import AgentAnswer, Message, VoteEvent
-
-from ..core.event_bus import EventBus, EventType
 
 
 class EventKind(str, Enum):
@@ -31,7 +24,7 @@ class FeedEvent:
     raw: bytes
 
 
-class EventAdapter:
+class Subscriber:
     """Event adapter for admin panel.
 
     Subscribes to EventBus events and buffers them in memory for UI
@@ -52,14 +45,15 @@ class EventAdapter:
         self._event_bus.subscribe(EventType.MESSAGE, self._on_message)
         self._event_bus.subscribe(EventType.ANSWER, self._on_answer)
         self._event_bus.subscribe(EventType.VOTE, self._on_vote)
-        logger.info('EventAdapter started')
+        logger.info('Subscriber started')
 
     async def stop(self) -> None:
         """Unsubscribe from EventBus events."""
         self._event_bus.unsubscribe(EventType.MESSAGE, self._on_message)
         self._event_bus.unsubscribe(EventType.ANSWER, self._on_answer)
         self._event_bus.unsubscribe(EventType.VOTE, self._on_vote)
-        logger.info('EventAdapter stopped')
+        self._buffer.clear()
+        logger.info('Subscriber stopped')
 
     def _on_message(self, event_type: EventType, data: Message) -> None:
         """Handle MESSAGE events."""

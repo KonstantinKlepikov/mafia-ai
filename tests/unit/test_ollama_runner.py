@@ -82,9 +82,9 @@ class TestResourceDetection:
 
         assert pool_size == 8
 
-    @patch('services.mafia_service.llm.resource_detection.subprocess.run')
-    @patch('services.mafia_service.llm.resource_detection.os.cpu_count')
-    @patch('services.mafia_service.llm.resource_detection.platform.system')
+    @patch('llm.resource_detection.subprocess.run')
+    @patch('llm.resource_detection.os.cpu_count')
+    @patch('llm.resource_detection.platform.system')
     def test_detect_hardware_with_gpu(
         self,
         mock_platform: Mock,
@@ -114,9 +114,9 @@ class TestResourceDetection:
         assert hardware.cpu_cores == 16
         assert hardware.total_ram_mb == 64000  # 65536000 // 1024
 
-    @patch('services.mafia_service.llm.resource_detection.subprocess.run')
-    @patch('services.mafia_service.llm.resource_detection.os.cpu_count')
-    @patch('services.mafia_service.llm.resource_detection.platform.system')
+    @patch('llm.resource_detection.subprocess.run')
+    @patch('llm.resource_detection.os.cpu_count')
+    @patch('llm.resource_detection.platform.system')
     def test_detect_hardware_without_gpu(
         self,
         mock_platform: Mock,

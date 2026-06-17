@@ -1,5 +1,3 @@
-"""Unified configuration for the Mafia AI service."""
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,7 +18,6 @@ class MafiaServiceSettings(BaseSettings):
         vote_max_tokens: Max tokens for vote generation.
         ui_enabled: Whether to enable Flet UI.
         ui_port: Port for Flet UI web server.
-        poll_interval_seconds: UI update loop interval.
 
     """
 
@@ -30,20 +27,19 @@ class MafiaServiceSettings(BaseSettings):
     ollama_timeout: int = 120
     llm_pool_size: int = 0
 
-    # Game settings (formerly from GameServiceSettings)
-    agent_count: int
-    mafia_count: int
-    phase_duration_seconds: int
-    vote_timeout_seconds: int
+    # Game settings (formerly from GameSettings)
+    agent_count: int = 10
+    mafia_count: int = 3
+    phase_duration_seconds: int = 180
+    vote_timeout_seconds: int = 60
 
     db_yaml_path: str = '/app/config/prompts.yaml'
-    message_max_tokens: int
-    vote_max_tokens: int
+    message_max_tokens: int = 150
+    vote_max_tokens: int = 50
 
     # UI settings
     ui_enabled: bool = True
     ui_port: int = 8550
-    poll_interval_seconds: float = 2.0
 
     model_config = SettingsConfigDict(env_prefix='', extra='ignore')
 

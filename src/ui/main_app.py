@@ -1,103 +1,73 @@
-"""Main Flet application for Mafia-AI admin panel (unified version)."""
-
 import asyncio
 
 import flet as ft
+from dependency_injector.wiring import Provide, inject
 from loguru import logger
 
+from config import AdminFletSettings, MafiaServiceSettings
+from core.service import Game
+from di_containers import Container
 from shared.models import AgentAnswer, Message, VoteEvent
 
-from ..config import AdminFletSettings, MafiaServiceSettings
-from ..core.event_bus import EventBus
-from ..core.service import GameService
-from ..llm.service import LLMService
 from .ask_agent_panel import AskAgentPanel
-from .event_adapter import EventAdapter, EventKind
 from .game_controls import GameControls
 from .host_decision_panel import HostDecisionPanel
 from .message_feed import MessageFeed
-from .service_adapter import GameServiceAdapter
 from .status_panel import StatusPanel
+from .subscriber import EventKind, Subscriber
 
 
 class MafiaAdminApp:
     """Mafia-AI admin panel application (unified version).
 
-    This version creates and manages LLMService, GameService and EventBus directly.
+    This version creates and manages LLM, Game and EventBus directly.
 
     Args:
-        game_settings: Unified service configuration.
+        settings: game service configuration.
         ui_settings: UI configuration settings.
 
     """
 
+    _game_controls: GameControls
+    _ask_agent_panel: AskAgentPanel
+    _host_decision_panel: HostDecisionPanel
+    _update_task: asyncio.Task
+    _page: ft.Page
+    _message_feed: MessageFeed
+    _status_panel: StatusPanel
+
+    @inject
     def __init__(
         self,
-        game_settings: MafiaServiceSettings,
-        ui_settings: AdminFletSettings,
+        settings: MafiaServiceSettings = Provide[Container.settings],
+        ui_settings: AdminFletSettings = Provide[Container.ui_settings],
+        subscriber: Subscriber = Provide[Container.subscriber],
+        game: Game = Provide[Container.game],
     ) -> None:
-        self._game_settings = game_settings
-        self._ui_settings = ui_settings
-
-        # Initialized in start()
-        self._llm_service: LLMService | None = None
-        self._event_bus: EventBus | None = None
-        self._game_service: GameService | None = None
-        self._client: GameServiceAdapter | None = None
-        self._subscriber: EventAdapter | None = None
-
-        self._message_feed = MessageFeed()
-        self._status_panel = StatusPanel()
-
-        self._game_controls: GameControls | None = None
-        self._ask_agent_panel: AskAgentPanel | None = None
-        self._host_decision_panel: HostDecisionPanel | None = None
-
-        self._update_task: asyncio.Task | None = None  # type: ignore[type-arg]
-        self._page: ft.Page | None = None
+        self.settings = settings
+        self.ui_settings = ui_settings
+        self._subscriber = subscriber
+        self._game: Game = game
 
     async def start(self, page: ft.Page) -> None:
         """Initialize and start the application."""
         self._page = page
         page.title = '🃏 Mafia-AI — Game Host UI'
         page.theme_mode = ft.ThemeMode.DARK
-        page.width = self._ui_settings.window_width
-        page.height = self._ui_settings.window_height
+        page.width = self.ui_settings.window_width
+        page.height = self.ui_settings.window_height
 
-        # Create LLMService
-        self._llm_service = LLMService(self._game_settings)
-        await self._llm_service.start()
-        logger.info('LLMService started successfully')
-
-        # Create EventBus and GameService
-        self._event_bus = EventBus()
-        self._game_service = GameService(
-            self._game_settings, self._llm_service, event_bus=self._event_bus
-        )
-
-        # Start GameService
-        try:
-            await self._game_service.start()
-            logger.info('GameService started successfully')
-        except Exception as exc:
-            logger.error(f'GameService failed to start: {exc}')
-            raise
-
-        # Create adapters
-        self._client = GameServiceAdapter(self._game_service)
-        self._subscriber = EventAdapter(self._event_bus)
+        await self._game.start()
         await self._subscriber.start()
 
-        self._game_controls = GameControls(
-            self._client,
-            on_game_started=self._on_game_started,
-        )
+        self._message_feed = MessageFeed()
+        self._status_panel = StatusPanel()
+
+        self._game_controls = GameControls(on_game_started=self._on_game_started)
         self._ask_agent_panel = AskAgentPanel(
-            self._client,
-            get_agents_fn=self._status_panel.get_agent_cache,
+            get_agents_fn=self._status_panel.get_agent_cache
         )
         self._host_decision_panel = HostDecisionPanel(
-            self._client,
             get_agents_fn=self._status_panel.get_agent_cache,
             on_decision_fn=self._on_host_decision,
         )
@@ -164,23 +134,15 @@ class MafiaAdminApp:
             except asyncio.CancelledError:
                 pass
 
-        if self._subscriber:
-            await self._subscriber.stop()
-        if self._client:
-            await self._client.close()
-        if self._game_service:
-            await self._game_service.stop()
-            logger.info('GameService stopped')
-        if self._llm_service:
-            await self._llm_service.stop()
-            logger.info('LLMService stopped')
+        await self._subscriber.stop()
+        await self._game.stop()
         logger.info('MafiaAdminApp stopped')
 
     async def _update_loop(self) -> None:
         """Main update loop for real-time updates."""
         while True:
             try:
-                await asyncio.sleep(self._ui_settings.poll_interval_seconds)
+                await asyncio.sleep(self.ui_settings.poll_interval_seconds)
                 await self._update_ui()
             except asyncio.CancelledError:
                 break
@@ -189,11 +151,11 @@ class MafiaAdminApp:
 
     async def _update_ui(self) -> None:
         """Update UI with latest data from game service and event bus."""
-        if not self._client or not self._subscriber:
+        if not self._subscriber:
             return
 
-        game_state = await self._client.get_state()
-        agents = await self._client.get_agents()
+        game_state = self._game.get_game_state()
+        agents = await self._game.get_agents_info()
 
         self._status_panel.update_state(game_state, agents)
 

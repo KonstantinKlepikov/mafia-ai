@@ -1,10 +1,9 @@
-"""Host decision panel UI component."""
-
 import flet as ft
+from dependency_injector.wiring import Provide, inject
 
+from core.service import Game
+from di_containers import Container
 from shared.models import AgentInfo, GameState, HostDecision, HostDecisionAction
-
-from .service_adapter import GameServiceAdapter, GameServiceAdapterError
 
 
 class HostDecisionPanel:
@@ -17,11 +16,10 @@ class HostDecisionPanel:
 
     def __init__(
         self,
-        client: GameServiceAdapter,
         get_agents_fn,  # type: ignore[no-untyped-def]
         on_decision_fn,  # type: ignore[no-untyped-def]
     ) -> None:
-        self._client = client
+        # self._client = client
         self._get_agents_fn = get_agents_fn
         self._on_decision_fn = on_decision_fn
         self._visible = False
@@ -88,7 +86,9 @@ class HostDecisionPanel:
         return self._container
 
     def update_visibility(
-        self, game_state: GameState | None, agents: dict[str, AgentInfo]
+        self,
+        game_state: GameState | None,
+        agents: dict[str, AgentInfo],
     ) -> None:
         """Update panel visibility based on game phase."""
         should_show = game_state is not None and game_state.phase == 'HOST_DECISION'
@@ -110,16 +110,18 @@ class HostDecisionPanel:
         self._container.visible = should_show
         self._container.update()
 
+    @inject
     async def _send_decision(
         self,
         decision: HostDecision,
         log_msg: str,
         success_msg: str,
         page: ft.BasePage | None,
+        game: Game = Provide[Container.game],
     ) -> None:
         """Send decision to orchestrator."""
         try:
-            await self._client.post_decision(decision)
+            game.submit_host_decision(decision)
             await self._on_decision_fn(log_msg)
             if page:
                 page.show_dialog(
@@ -128,11 +130,11 @@ class HostDecisionPanel:
                         bgcolor=ft.Colors.GREEN,
                     )
                 )
-        except GameServiceAdapterError as exc:
+        except Exception as exc:
             if page:
                 page.show_dialog(
                     ft.SnackBar(
-                        content=ft.Text(f'Error: {exc}'),
+                        content=ft.Text(f'Error: {exc.__str__()}'),
                         bgcolor=ft.Colors.RED,
                     )
                 )

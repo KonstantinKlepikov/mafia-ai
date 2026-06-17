@@ -5,6 +5,8 @@ from collections.abc import AsyncGenerator
 
 from loguru import logger
 
+from config import MafiaServiceSettings
+from llm.service import LLM
 from shared.database import Database
 from shared.models import (
     AgentAnswer,
@@ -21,8 +23,6 @@ from shared.models import (
     VoteEvent,
 )
 
-from ..config import MafiaServiceSettings
-from ..llm.service import LLMService
 from .agent_logic import AgentLogic
 from .event_bus import EventBus, EventType
 from .vote_resolver import resolve_votes
@@ -32,18 +32,21 @@ class AgentManager:
     """Manages all AI agents in a single process.
 
     Args:
-        llm_service: LLM service for direct local inference.
+        llm: LLM service for direct local inference.
         db: Database instance with personas and state storage.
 
     """
 
-    def __init__(self, llm_service: LLMService, db: Database) -> None:
-        self._llm_service = llm_service
+    def __init__(self, llm: LLM, db: Database) -> None:
+        self._llm = llm
         self._db = db
         self._agents: dict[str, AgentLogic] = {}
 
     async def initialize_agent(
-        self, agent_id: str, role: AgentRole, persona_id: str
+        self,
+        agent_id: str,
+        role: AgentRole,
+        persona_id: str,
     ) -> None:
         """Initialize a new agent with given role and persona."""
         persona = await self._db.get_persona(persona_id)
@@ -58,7 +61,7 @@ class AgentManager:
         agent_logic = AgentLogic(
             agent_id=agent_id,
             persona=system_prompt,
-            llm_service=self._llm_service,
+            llm=self._llm,
             db=self._db,
         )
         self._agents[agent_id] = agent_logic
@@ -116,11 +119,11 @@ class AgentManager:
         logger.info('AgentManager closed')
 
 
-class GameService:
+class Game:
     """Unified game orchestrator and agent manager.
 
     Runs an asyncio game loop as a background task once a game is started.
-    Manages all AI agents internally without HTTP overhead.
+    Manages all AI agents.
 
     The FSM cycle per round:
     NIGHT → NIGHT_VOTE → RESOLVE_NIGHT → DAY → DAY_VOTE → HOST_DECISION
@@ -128,67 +131,83 @@ class GameService:
 
     Args:
         settings: Populated MafiaServiceSettings instance.
-        llm_service: LLM service for direct local inference.
+        llm: LLM service for direct local inference.
         event_bus: Optional event bus for UI notifications.
 
     """
 
+    # Game state
+    _round: int
+    _phase: GamePhase
+    _alive: list[str]
+    _eliminated: list[str]
+    _roles: dict[str, AgentRole]
+
+    # Message history and SSE subscribers
+    _messages: list[Message]
+    _message_queues: list[asyncio.Queue[Message]]
+
+    # Vote collection (single queue for vote.* routing key)
+    _vote_queue: asyncio.Queue[VoteEvent]
+
+    # Host decision synchronisation
+    _host_decision: HostDecision | None
+    _host_decision_event: asyncio.Event
+
+    # Background game task
+    _game_task: asyncio.Task | None
+    _game_active: bool
+
     def __init__(
         self,
         settings: MafiaServiceSettings,
-        llm_service: LLMService,
-        event_bus: EventBus | None = None,
+        llm: LLM,
+        event_bus: EventBus,
+        db: Database,
     ) -> None:
         self._settings = settings
-        self._db = Database()
-        self._llm_service = llm_service
-        self._agent_manager = AgentManager(llm_service, self._db)
-        self._event_bus = event_bus or EventBus()
-
-        # Game state
-        self._round: int = 0
-        self._phase: GamePhase = GamePhase.DAY
-        self._alive: list[str] = []
-        self._eliminated: list[str] = []
-        self._roles: dict[str, AgentRole] = {}
-
-        # Message history and SSE subscribers
-        self._messages: list[Message] = []
-        self._message_queues: list[asyncio.Queue[Message]] = []
-
-        # Vote collection (single queue for vote.* routing key)
-        self._vote_queue: asyncio.Queue[VoteEvent] = asyncio.Queue()
-
-        # Host decision synchronisation
-        self._host_decision: HostDecision | None = None
-        self._host_decision_event: asyncio.Event = asyncio.Event()
-
-        # Background game task
-        self._game_task: asyncio.Task | None = None  # type: ignore[type-arg]
-        self._game_active: bool = False
-
-    # ------------------------------------------------------------------
-    # Startup / shutdown
-    # ------------------------------------------------------------------
+        self._db = db
+        self._llm = llm
+        self._agent_manager = AgentManager(llm, self._db)
+        self._event_bus = event_bus
+        self.default_game_stats()
 
     async def start(self) -> None:
         """Connect to Database and initialize game data."""
-        await self._db.connect()
-        await self._db.init_from_yaml(self._settings.db_yaml_path)
-        logger.info('GameService started')
+        try:
+            await self.stop()
+            await self._llm.start()
+            await self._db.connect()
+            await self._db.init_from_yaml(self._settings.db_yaml_path)
+            logger.info('Game started')
+        except Exception as exc:
+            logger.error(f'Game failed to start: {exc.__str__()}')
+            raise
 
     async def stop(self) -> None:
         """Cancel the game task and close all connections."""
         if self._game_task is not None and not self._game_task.done():
             self._game_task.cancel()
         await self._agent_manager.close()
-        await self._llm_service.stop()
         await self._db.close()
-        logger.info('GameService stopped')
+        await self._llm.stop()
+        self.default_game_stats()
+        logger.info('Game stopped')
 
-    # ------------------------------------------------------------------
-    # Public interface (called by REST handlers)
-    # ------------------------------------------------------------------
+    def default_game_stats(self) -> None:
+        """Set default game stats"""
+        self._round = 0
+        self._phase = GamePhase.DAY
+        self._alive = []
+        self._eliminated = []
+        self._roles = {}
+        self._messages = []
+        self._message_queues = []
+        self._vote_queue = asyncio.Queue()
+        self._host_decision = None
+        self._host_decision_event = asyncio.Event()
+        self._game_task = None
+        self._game_active = False
 
     async def begin_game(self) -> None:
         """Initialise roles/personas and launch the game loop.
@@ -198,7 +217,7 @@ class GameService:
 
         """
         if self._game_active:
-            raise RuntimeError('A game is already in progress')
+            raise RuntimeError('A game is already in progress. ')
         await self._init_game()
         self._game_task = asyncio.create_task(self._run_game_loop())
 
@@ -207,8 +226,8 @@ class GameService:
         return GameState(
             round=self._round,
             phase=self._phase,
-            alive_agents=list(self._alive),
-            eliminated=list(self._eliminated),
+            alive_agents=self._alive,
+            eliminated=self._eliminated,
         )
 
     def submit_host_decision(self, decision: HostDecision) -> None:
@@ -313,8 +332,11 @@ class GameService:
         )
 
     async def ask_agent(
-        self, agent_id: str, question_text: str, timeout: float = 60.0
-    ) -> str | None:
+        self,
+        agent_id: str,
+        question_text: str,
+        timeout: float = 60.0,
+    ) -> str:
         """Ask agent a question and return the answer.
 
         Args:
@@ -323,7 +345,7 @@ class GameService:
             timeout: Maximum seconds to wait for answer.
 
         Returns:
-            Answer text, or None if request fails or times out.
+            Answer text.
 
         """
         try:
@@ -344,8 +366,8 @@ class GameService:
 
             return answer_text
         except (asyncio.TimeoutError, Exception) as exc:
-            logger.warning(f'Failed to get answer from {agent_id}: {exc}')
-            return None
+            logger.warning(f'Failed to get answer from {agent_id}: {exc.__str__()}')
+            raise
 
     async def force_stop_agent(self, agent_id: str) -> None:
         """Force-eliminate an agent.
@@ -355,10 +377,6 @@ class GameService:
 
         """
         await self._eliminate_agent(agent_id)
-
-    # ------------------------------------------------------------------
-    # Game initialisation
-    # ------------------------------------------------------------------
 
     async def _init_game(self) -> None:
         """Assign roles and personas, reset state, publish init messages."""
@@ -406,10 +424,6 @@ class GameService:
             f'Game initialised: {self._settings.agent_count} agents, '
             f'{self._settings.mafia_count} mafia'
         )
-
-    # ------------------------------------------------------------------
-    # Game FSM loop
-    # ------------------------------------------------------------------
 
     async def _run_game_loop(self) -> None:
         """Main finite-state-machine game loop."""
@@ -628,10 +642,6 @@ class GameService:
             return True
 
         return False
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     def _mafia_alive(self) -> list[str]:
         return [a for a in self._alive if self._roles.get(a) == AgentRole.MAFIA]

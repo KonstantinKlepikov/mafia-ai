@@ -2,7 +2,7 @@
 set -e
 
 echo "========================================="
-echo "Starting Unified Mafia-AI Service"
+echo "Starting Mafia-AI Service"
 echo "========================================="
 
 # Get model name from environment variable (default: llama3.1:8b)
@@ -51,4 +51,4 @@ echo "Starting Mafia-AI application..."
 echo "========================================="
 
 # Run the Python application
-exec python -m mafia_service.main
+exec python -m main

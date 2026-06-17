@@ -1,5 +1,3 @@
-"""Message feed UI component."""
-
 import flet as ft
 
 from shared.models import AgentAnswer, Message, TargetAudience, VoteEvent

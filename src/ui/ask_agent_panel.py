@@ -1,10 +1,9 @@
-"""Ask agent panel UI component."""
-
 import flet as ft
+from dependency_injector.wiring import Provide, inject
 
+from core.service import Game
+from di_containers import Container
 from shared.models import AgentInfo
-
-from .service_adapter import GameServiceAdapter, GameServiceAdapterError
 
 
 class AskAgentPanel:
@@ -16,10 +15,8 @@ class AskAgentPanel:
 
     def __init__(
         self,
-        client: GameServiceAdapter,
         get_agents_fn,  # type: ignore[no-untyped-def]
     ) -> None:
-        self._client = client
         self._get_agents_fn = get_agents_fn
         self._agent_dropdown = ft.Dropdown(
             label='Agent',
@@ -70,7 +67,12 @@ class AskAgentPanel:
 
         self._agent_dropdown.update()
 
-    async def _handle_ask(self, e: ft.ControlEvent) -> None:
+    @inject
+    async def _handle_ask(
+        self,
+        e: ft.ControlEvent,
+        game: Game = Provide[Container.game],
+    ) -> None:
         """Handle ask button click."""
         agent_id = self._agent_dropdown.value
         question = self._question_field.value
@@ -86,7 +88,7 @@ class AskAgentPanel:
             return
 
         try:
-            await self._client.ask_agent(agent_id, question.strip())
+            await game.ask_agent(agent_id, question.strip())
             self._question_field.value = ''
             self._question_field.update()
 
@@ -97,11 +99,11 @@ class AskAgentPanel:
                         bgcolor=ft.Colors.GREEN,
                     )
                 )
-        except GameServiceAdapterError as exc:
+        except Exception as exc:
             if e.page:
                 e.page.show_dialog(
                     ft.SnackBar(
-                        content=ft.Text(f'Error: {exc}'),
+                        content=ft.Text(f'Error: {exc.__str__()}'),
                         bgcolor=ft.Colors.RED,
                     )
                 )

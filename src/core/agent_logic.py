@@ -2,6 +2,8 @@ import random
 
 from loguru import logger
 
+from llm.schemas.llm_schemas import GenerateRequest, MessageItem, MessageRole
+from llm.service import LLM
 from shared.database import Database
 from shared.models import (
     AgentRole,
@@ -10,9 +12,6 @@ from shared.models import (
     SystemPrompt,
     TargetAudience,
 )
-
-from ..llm.schemas.llm_schemas import GenerateRequest, MessageItem, MessageRole
-from ..llm.service import LLMService
 
 
 class AgentLogic:
@@ -24,7 +23,7 @@ class AgentLogic:
     Args:
         agent_id: Unique agent identifier (e.g. 'agent-1').
         persona: SystemPrompt with character details.
-        llm_service: LLM service for direct local inference.
+        llm: LLM service for direct local inference.
         db: Database instance for state persistence.
 
     """
@@ -33,12 +32,12 @@ class AgentLogic:
         self,
         agent_id: str,
         persona: SystemPrompt,
-        llm_service: LLMService,
+        llm: LLM,
         db: Database,
     ) -> None:
         self._agent_id = agent_id
         self._persona = persona
-        self._llm_service = llm_service
+        self._llm = llm
         self._db = db
 
     async def generate_message(self, phase: GamePhase, game_round: int) -> str:
@@ -227,5 +226,5 @@ class AgentLogic:
             max_tokens=max_tokens,
         )
 
-        response = await self._llm_service.generate(request)
+        response = await self._llm.generate(request)
         return response.text
