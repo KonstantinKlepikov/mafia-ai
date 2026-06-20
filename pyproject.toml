@@ -45,6 +45,7 @@ gevent = "^25.0"
 types-requests = "^2.33.0.20260518"
 types-pyyaml = "^6.0.12.20260518"
 types-aiofiles = "^25.1.0.20260518"
+watchdog = { extras = ["watchmedo"], version = "^6.0.0" }
 
 
 [build-system]
@@ -81,12 +82,12 @@ exclude = [
     ".venv/",
 ]
 
-mypy_path = ["src", "tests"]
+mypy_path = ["src", "tests", "app"]
 plugins = ["pydantic.mypy"]
 
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "tests"]
+pythonpath = ["src", "tests", "app"]
 python_files = "test_*.py"
 testpaths = "tests"
 norecursedirs = ["venv*", ".venv"]

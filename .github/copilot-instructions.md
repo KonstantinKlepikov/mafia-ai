@@ -168,4 +168,3 @@ async def test_create_flight_with_valid_data(
         f'wrong {result.callsign}, expected {expected_callsign}'
     )
 ```
-

@@ -84,7 +84,7 @@ class AgentLogic:
             target_audience=target_audience,
         )
         state.message_history.append(message)
-        await self._db.upsert_agent_state(self._agent_id, state)
+        await self._db.update_agent_state(self._agent_id, state)
 
         logger.info(
             f'Agent {self._agent_id} generated message for phase {phase}: '
@@ -180,7 +180,7 @@ class AgentLogic:
             return
 
         state.message_history.append(message)
-        await self._db.upsert_agent_state(self._agent_id, state)
+        await self._db.update_agent_state(self._agent_id, state)
 
         logger.debug(
             f'Agent {self._agent_id} added message from {message.sender_id} to history'

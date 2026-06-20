@@ -1,6 +1,7 @@
 import flet as ft
 from loguru import logger
 
+from di_containers import Container
 from ui.main_app import MafiaAdminApp
 
 
@@ -18,12 +19,13 @@ def main() -> None:
             logger.error(f'Failed to start MafiaAdminApp: {exc.__str__()}')
             raise
 
-    ft.app(
-        target=flet_main,
+    ft.run(
+        main=flet_main,
         view=ft.AppView.WEB_BROWSER,
         port=8550,
     )
 
 
 if __name__ == '__main__':
+    container = Container()
     main()

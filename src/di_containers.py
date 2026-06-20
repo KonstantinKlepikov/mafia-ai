@@ -25,7 +25,7 @@ class Container(containers.DeclarativeContainer):
     llm = providers.Singleton(LLM, settings=settings)
     event_bus = providers.Singleton(EventBus)
     subscriber = providers.Singleton(Subscriber, event_bus=event_bus)
-    db = providers.Singleton(Database, settings=settings)
+    db = providers.Singleton(Database)
     game = providers.Singleton(
         Game,
         settings=settings,

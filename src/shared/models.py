@@ -119,7 +119,6 @@ class GameState(BaseModel):
 class AgentState(BaseModel):
     """Local agent state maintained inside the agent service.
 
-    - `persona_id` references a VectorDB entry holding the agent's system prompt.
     - `message_history` stores received and sent messages for the current game.
 
     """

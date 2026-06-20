@@ -26,16 +26,17 @@ RUN curl -sSL https://install.python-poetry.org | python3 -
 ENV PATH="/root/.local/bin:$PATH"
 
 # Copy Poetry configuration
-COPY pyproject.toml poetry.lock poetry.toml ./
+COPY pyproject.toml poetry.lock ./
 
 # Install Python dependencies
-RUN POETRY_VIRTUALENVS_CREATE=false poetry install --no-root --no-interaction --only main
+RUN POETRY_VIRTUALENVS_CREATE=false poetry install --no-root --no-interaction
 
 # Copy source code
-COPY src/ .
+COPY tests ./tests
+COPY src ./src
 COPY config ./config
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/src
 
 EXPOSE 8550
 

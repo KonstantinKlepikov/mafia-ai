@@ -50,5 +50,5 @@ echo "========================================="
 echo "Starting Mafia-AI application..."
 echo "========================================="
 
-# Run the Python application
-exec python -m main
+# Run the Flet application
+exec watchmedo auto-restart --directory=./ --pattern=*.py --recursive -- python -m src.main

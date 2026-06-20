@@ -87,7 +87,7 @@ def settings() -> MafiaServiceSettings:
 def mock_database() -> AsyncMock:
     """Mocked Database with 4 personas."""
     m = AsyncMock()
-    m.list_personas.return_value = [_make_persona(n) for n in range(1, 5)]
+    m.get_personas.return_value = [_make_persona(n) for n in range(1, 5)]
     m.get_persona.return_value = _make_persona(1)
     return m
 

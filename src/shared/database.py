@@ -1,7 +1,8 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import aiofiles
 import aiosqlite
@@ -9,7 +10,7 @@ import yaml
 from aiofiles import os as aos
 from loguru import logger
 
-from .models import AgentRole, AgentState, AgentStatus, GamePhase, SystemPrompt
+from .models import AgentRole, AgentState, AgentStatus, GamePhase, Message, SystemPrompt
 
 
 class Database:
@@ -33,6 +34,12 @@ class Database:
         self._db_path = db_path
         self._conn: aiosqlite.Connection | None = None
 
+    @asynccontextmanager
+    async def mconn(self) -> AsyncGenerator[aiosqlite.Connection, None]:
+        """Db connection contexted"""
+        yield self.conn
+        await self.close()
+
     @property
     def conn(self) -> aiosqlite.Connection:
         """Db connection"""
@@ -43,13 +50,11 @@ class Database:
 
     async def connect(self) -> None:
         """Open database connection and create schema."""
-        if self._conn is not None:
-            return
-
-        self._conn = await aiosqlite.connect(self._db_path)
-        self._conn.row_factory = aiosqlite.Row
-        await self._create_schema()
-        logger.info(f'Database connected: {self._db_path}')
+        if self._conn is None:
+            self._conn = await aiosqlite.connect(self._db_path)
+            self._conn.row_factory = aiosqlite.Row
+            await self._create_schema(conn=self._conn)
+            logger.info(f'Database connected: {self._db_path}')
 
     async def close(self) -> None:
         """Close database connection."""
@@ -58,17 +63,15 @@ class Database:
             self._conn = None
             logger.info('Database closed')
 
-    async def _create_schema(self) -> None:
+    @staticmethod
+    async def _create_schema(conn: aiosqlite.Connection) -> None:
         """Create tables for personas, game_state, and agent_states.
 
         Raises:
             RuntimeError: Database not connected
 
         """
-        if self._conn is None:
-            raise RuntimeError('Database not connected')
-
-        await self._conn.execute(
+        await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS personas (
                 id TEXT PRIMARY KEY,
@@ -79,7 +82,7 @@ class Database:
             """
         )
 
-        await self._conn.execute(
+        await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS game_state (
                 game_id TEXT PRIMARY KEY,
@@ -91,7 +94,7 @@ class Database:
             """
         )
 
-        await self._conn.execute(
+        await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS agent_states (
                 agent_id TEXT PRIMARY KEY,
@@ -105,19 +108,18 @@ class Database:
             """
         )
 
-        await self._conn.commit()
+        await conn.commit()
 
-    async def init_from_yaml(self, yaml_path: str | Path) -> None:
+    async def init_from_yaml(self, yaml_path: Path) -> None:
         """Load personas from YAML config into database.
 
         Args:
-            yaml_path: Path to prompts.yaml config file.
+            yaml_path (Path): Path to prompts.yaml config file.
 
         Raises:
             FileNotFoundError: If yaml_path does not exist.
 
         """
-        yaml_path = Path(yaml_path)
         if not await aos.path.exists(yaml_path):
             raise FileNotFoundError(f'Config file not found: {yaml_path}')
 
@@ -178,7 +180,7 @@ class Database:
             prompt=row['prompt'],
         )
 
-    async def list_personas(self) -> list[SystemPrompt]:
+    async def get_personas(self) -> list[SystemPrompt]:
         """Return all personas in database.
 
         Returns:
@@ -201,12 +203,20 @@ class Database:
             for row in rows
         ]
 
-    async def upsert_agent_state(self, agent_id: str, state: AgentState) -> None:
+    async def update_agent_state(self, agent_id: str, state: AgentState) -> None:
         """Insert or update agent state.
 
         Args:
             agent_id: Agent identifier (e.g. 'agent-1').
             state: AgentState to persist.
+
+        FIXME: set agent_id as increment in db. Use only persona_id
+        Remove agent_id acros all code
+        remove role and game, because it is not changed values
+        add agent status
+        remove status and state
+        FIXME: rename to Update_agent_messages. Update status is defined downed
+        NFIXME: store message historey as text, not a json
 
         """
         message_history_json = json.dumps(
@@ -221,7 +231,7 @@ class Database:
             """,
             (
                 agent_id,
-                'game-1',  # Single game for now
+                'game-1',
                 state.role.value,
                 AgentStatus.ALIVE.value,  # Default to ALIVE
                 state.persona_id,
@@ -240,6 +250,9 @@ class Database:
         Returns:
             AgentState if found, None otherwise.
 
+        FIXME: get message history as text, not a json
+        FIXME: not a agent_id, persona_id
+
         """
         cursor = await self.conn.execute(
             """
@@ -252,8 +265,6 @@ class Database:
 
         if row is None:
             return None
-
-        from .models import Message
 
         message_history = [
             Message.model_validate(msg_dict)
@@ -273,6 +284,8 @@ class Database:
         Args:
             agent_id: Agent identifier.
             status: New status.
+
+        FIXME: not a agent_id, persona_id
 
         """
         await self.conn.execute(
@@ -323,6 +336,8 @@ class Database:
 
         Returns:
             Dict with game_id, round, phase, alive_agents, eliminated, or None.
+
+        FIXME: return scheme
 
         """
         cursor = await self.conn.execute(

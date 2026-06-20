@@ -1,11 +1,26 @@
+from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from config import AdminFletSettings, MafiaServiceSettings
 from di_containers import Container
+from shared.database import Database
 from shared.models import GamePhase, GameState
 from ui.main_app import MafiaAdminApp
+
+
+class DbContextManager:
+    def __init__(self, db: Database):
+        self.db = db
+
+    async def __aenter__(self):
+        await self.db.connect()
+        return self.db
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.db.close()
+        return False
 
 
 @pytest.fixture(scope='session')
@@ -41,6 +56,14 @@ def ui_settings() -> AdminFletSettings:
     """Override settings"""
     config_dict = {}  # type: ignore
     return AdminFletSettings(**config_dict)  # type: ignore
+
+
+@pytest.fixture(scope='function')
+async def db(settings: MafiaServiceSettings) -> AsyncGenerator[Database, None]:
+    """Override settings"""
+    async with DbContextManager(Database()) as db:
+        await db.init_from_yaml(settings.db_yaml_path)
+        yield db
 
 
 @pytest.fixture(scope='session')

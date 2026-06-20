@@ -72,7 +72,7 @@ class AgentManager:
             persona_id=persona_id,
             message_history=[],
         )
-        await self._db.upsert_agent_state(agent_id, state)
+        await self._db.update_agent_state(agent_id, state)
 
         logger.info(
             f'Agent {agent_id} initialized with role={role}, persona={persona_id}'
@@ -132,7 +132,8 @@ class Game:
     Args:
         settings: Populated MafiaServiceSettings instance.
         llm: LLM service for direct local inference.
-        event_bus: Optional event bus for UI notifications.
+        event_bus: event bus for UI notifications.
+        dbL Databse.
 
     """
 
@@ -168,7 +169,7 @@ class Game:
         self._settings = settings
         self._db = db
         self._llm = llm
-        self._agent_manager = AgentManager(llm, self._db)
+        self._agent_manager = AgentManager(llm, db)
         self._event_bus = event_bus
         self.default_game_stats()
 
@@ -390,7 +391,7 @@ class Game:
         }
 
         # Assign personas from Database (unique when possible)
-        personas = await self._db.list_personas()
+        personas = await self._db.get_personas()
         if len(personas) >= self._settings.agent_count:
             sampled = random.sample(personas, self._settings.agent_count)
         else:

@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
 
 class MafiaServiceSettings(BaseSettings):
@@ -33,7 +34,7 @@ class MafiaServiceSettings(BaseSettings):
     phase_duration_seconds: int = 180
     vote_timeout_seconds: int = 60
 
-    db_yaml_path: str = '/app/config/prompts.yaml'
+    db_yaml_path: Path = Path('./config/prompts.yaml')
     message_max_tokens: int = 150
     vote_max_tokens: int = 50
 

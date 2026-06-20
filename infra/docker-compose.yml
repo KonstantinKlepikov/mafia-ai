@@ -26,6 +26,8 @@ services:
     volumes:
       - ${PWD}/config:/app/config:ro
       - ollama_models:/root/.ollama
+      - ../src:/app/src
+      - ../tests:/app/tests
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "8550"]
       interval: 15s
