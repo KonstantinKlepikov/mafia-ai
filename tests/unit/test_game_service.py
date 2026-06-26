@@ -13,7 +13,6 @@ from shared.models import (
     HostDecision,
     HostDecisionAction,
     Message,
-    PersonaType,
     SystemPrompt,
     TargetAudience,
     VoteEvent,

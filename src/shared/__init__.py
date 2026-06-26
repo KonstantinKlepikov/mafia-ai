@@ -1,7 +1,8 @@
 from .database import Database
 from .models import (
     AgentRole,
-    AgentState,
+    AgentStateIn,
+    AgentStateOut,
     GamePhase,
     GameState,
     Message,
@@ -12,7 +13,8 @@ from .models import (
 
 __all__ = [
     'AgentRole',
-    'AgentState',
+    'AgentStateIn',
+    'AgentStateOut',
     'Database',
     'GamePhase',
     'GameState',

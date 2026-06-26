@@ -3,7 +3,7 @@ from collections import Counter
 from shared.models import VoteEvent
 
 
-def resolve_votes(votes: list[VoteEvent]) -> str | None:
+def resolve_votes(votes: list[VoteEvent]) -> int | None:
     """Return the target with a strict majority, or None if no consensus.
 
     A strict majority requires more than half of all cast votes for a single

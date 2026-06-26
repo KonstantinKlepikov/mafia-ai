@@ -2,7 +2,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import AsyncGenerator
 
 import aiofiles
 import aiosqlite
@@ -10,19 +10,31 @@ import yaml
 from aiofiles import os as aos
 from loguru import logger
 
-from .models import AgentRole, AgentState, AgentStatus, GamePhase, Message, SystemPrompt
+from .models import (
+    AgentCount,
+    AgentRole,
+    AgentStateIn,
+    AgentStateOut,
+    AgentStatus,
+    GamePhase,
+    GameState,
+    Message,
+    SystemPrompt,
+)
 
 
 class Database:
-    """Async SQLite in-memory database wrapper.
+    """Async SQLite database wrapper.
 
-    DB Stores:
+    NOTE: DB Stores
+
     - Personas (loaded from YAML config)
-    - Game state (current round, phase, alive/eliminated agents)
-    - Agent states (role, status, persona_id, message_history)
+    - Game state
+    - Agent states
+    - Agent messages
 
     Provides CRUD operations for personas, game state, and agent states.
-    All data is stored in-memory (`:memory:`) by default for fast access
+    All data is stored in-memory by default for fast access
     and automatic cleanup on service restart.
 
     Args:
@@ -63,6 +75,9 @@ class Database:
             self._conn = None
             logger.info('Database closed')
 
+    async def commit(self) -> None:
+        await self.conn.commit()
+
     @staticmethod
     async def _create_schema(conn: aiosqlite.Connection) -> None:
         """Create tables for personas, game_state, and agent_states.
@@ -74,7 +89,7 @@ class Database:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS personas (
-                id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 type TEXT NOT NULL,
                 prompt TEXT NOT NULL
@@ -85,11 +100,9 @@ class Database:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS game_state (
-                game_id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 round INTEGER NOT NULL,
-                phase TEXT NOT NULL,
-                alive_agents TEXT NOT NULL,
-                eliminated TEXT NOT NULL
+                phase TEXT NOT NULL
             )
             """
         )
@@ -97,27 +110,44 @@ class Database:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS agent_states (
-                agent_id TEXT PRIMARY KEY,
-                game_id TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                persona_id INTEGER NOT NULL,
                 role TEXT NOT NULL,
                 status TEXT NOT NULL,
-                persona_id TEXT,
-                message_history TEXT NOT NULL,
-                FOREIGN KEY(persona_id) REFERENCES personas(id)
+                FOREIGN KEY(persona_id) REFERENCES personas(id),
+                FOREIGN KEY(game_id) REFERENCES game_state(id)
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                round INTEGER NOT NULL,
+                phase INTEGER NOT NULL,
+                target_audience TEXT NOT NULL,
+                FOREIGN KEY(sender_id) REFERENCES agent_states(id)
             )
             """
         )
 
         await conn.commit()
 
-    async def init_from_yaml(self, yaml_path: Path) -> None:
-        """Load personas from YAML config into database.
+    async def init_personas_from_yaml(self, yaml_path: Path) -> list[int]:
+        """Load personas from YAML config into database. System is olways first.
 
         Args:
             yaml_path (Path): Path to prompts.yaml config file.
 
         Raises:
             FileNotFoundError: If yaml_path does not exist.
+
+        Returns:
+            ;ist[int]: list of personas ids
 
         """
         if not await aos.path.exists(yaml_path):
@@ -128,39 +158,38 @@ class Database:
 
         config = await asyncio.to_thread(yaml.safe_load, content)
 
-        personas = config.get('personas', [])
-        if not personas:
-            logger.warning('No personas found in YAML config')
-            return
+        inserted_ids: list[int] = []
 
-        for persona_data in personas:
-            await self.conn.execute(
+        for persona_data in config.get('personas', []):
+            cursor = await self.conn.execute(
                 """
-                INSERT OR REPLACE INTO personas (id, name, type, prompt)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO personas (name, type, prompt)
+                VALUES (?, ?, ?)
                 """,
                 (
-                    persona_data['id'],
                     persona_data['name'],
                     persona_data['type'],
                     persona_data['prompt'],
                 ),
             )
+            inserted_ids.append(cursor.lastrowid)  # type: ignore[arg-type]
 
         await self.conn.commit()
-        logger.info(f'Loaded {len(personas)} personas from {yaml_path}')
+        logger.info(f'Loaded {len(inserted_ids)} personas from {yaml_path}')
 
-    async def get_persona(self, persona_id: str) -> SystemPrompt:
+        return inserted_ids
+
+    async def get_persona(self, persona_id: int) -> SystemPrompt:
         """Retrieve a persona by ID.
 
         Args:
-            persona_id: Persona identifier (e.g. 'persona-1').
-
-        Returns:
-            SystemPrompt populated from database.
+            persona_id (int): persona identifier.
 
         Raises:
             ValueError: If persona not found.
+
+        Returns:
+            SystemPrompt
 
         """
 
@@ -184,7 +213,7 @@ class Database:
         """Return all personas in database.
 
         Returns:
-            List of SystemPrompt objects.
+            list[SystemPrompt]: List of SystemPrompt objects.
 
         """
 
@@ -203,159 +232,468 @@ class Database:
             for row in rows
         ]
 
-    async def update_agent_state(self, agent_id: str, state: AgentState) -> None:
-        """Insert or update agent state.
-
-        Args:
-            agent_id: Agent identifier (e.g. 'agent-1').
-            state: AgentState to persist.
-
-        FIXME: set agent_id as increment in db. Use only persona_id
-        Remove agent_id acros all code
-        remove role and game, because it is not changed values
-        add agent status
-        remove status and state
-        FIXME: rename to Update_agent_messages. Update status is defined downed
-        NFIXME: store message historey as text, not a json
-
-        """
-        message_history_json = json.dumps(
-            [msg.model_dump() for msg in state.message_history]
-        )
-
-        await self.conn.execute(
-            """
-            INSERT OR REPLACE INTO agent_states
-            (agent_id, game_id, role, status, persona_id, message_history)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                agent_id,
-                'game-1',
-                state.role.value,
-                AgentStatus.ALIVE.value,  # Default to ALIVE
-                state.persona_id,
-                message_history_json,
-            ),
-        )
-
-        await self.conn.commit()
-
-    async def get_agent_state(self, agent_id: str) -> AgentState | None:
-        """Retrieve agent state by ID.
-
-        Args:
-            agent_id: Agent identifier (e.g. 'agent-1').
+    async def init_game(self) -> int:
+        """Insert new started game with round 1 and phase NIGHT.
 
         Returns:
-            AgentState if found, None otherwise.
-
-        FIXME: get message history as text, not a json
-        FIXME: not a agent_id, persona_id
+            int: current game ID.
 
         """
         cursor = await self.conn.execute(
             """
-            SELECT agent_id, role, status, persona_id, message_history
-            FROM agent_states WHERE agent_id = ?
+            INSERT INTO game_state
+            (round, phase)
+            VALUES (?, ?)
             """,
-            (agent_id,),
-        )
-        row = await cursor.fetchone()
-
-        if row is None:
-            return None
-
-        message_history = [
-            Message.model_validate(msg_dict)
-            for msg_dict in json.loads(row['message_history'])
-        ]
-
-        return AgentState(
-            agent_id=row['agent_id'],
-            role=AgentRole(row['role']),
-            persona_id=row['persona_id'],
-            message_history=message_history,
-        )
-
-    async def update_agent_status(self, agent_id: str, status: AgentStatus) -> None:
-        """Update agent status (ALIVE or ELIMINATED).
-
-        Args:
-            agent_id: Agent identifier.
-            status: New status.
-
-        FIXME: not a agent_id, persona_id
-
-        """
-        await self.conn.execute(
-            'UPDATE agent_states SET status = ? WHERE agent_id = ?',
-            (status.value, agent_id),
+            (
+                1,
+                GamePhase.NIGHT.value,
+            ),
         )
         await self.conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
 
-    async def upsert_game_state(
-        self,
-        game_id: str,
-        round_num: int,
-        phase: GamePhase,
-        alive_agents: list[str],
-        eliminated: list[str],
-    ) -> None:
-        """Insert or update game state.
+    async def update_game(self, game_id: int, round: int, phase: GamePhase) -> None:
+        """Update game state.
 
         Args:
             game_id: Game identifier.
             round_num: Current round number.
             phase: Current game phase.
-            alive_agents: List of living agent IDs.
-            eliminated: List of eliminated agent IDs.
 
         """
         await self.conn.execute(
             """
-            INSERT OR REPLACE INTO game_state
-            (game_id, round, phase, alive_agents, eliminated)
-            VALUES (?, ?, ?, ?, ?)
+            REPLACE INTO game_state
+            (id, round, phase)
+            VALUES (?, ?, ?)
             """,
             (
                 game_id,
-                round_num,
+                round,
                 phase.value,
-                json.dumps(alive_agents),
-                json.dumps(eliminated),
             ),
         )
         await self.conn.commit()
 
-    async def get_game_state(self, game_id: str) -> dict[str, Any] | None:
-        """Retrieve game state by ID.
+    async def update_game_phase(self, game_id: int, phase: GamePhase) -> None:
+        """Update game state.
 
         Args:
             game_id: Game identifier.
+            phase: Current game phase.
+
+        TODO: test me
+
+        """
+        await self.conn.execute(
+            """
+            REPLACE INTO game_state
+            (id, phase)
+            VALUES (?, ?)
+            """,
+            (
+                game_id,
+                phase.value,
+            ),
+        )
+        await self.conn.commit()
+
+    async def update_round(self, game_id: int, round: int) -> None:
+        """Update game state.
+
+        Args:
+            game_id: Game identifier.
+            round_num: Current round number.
+
+        TODO: test me
+
+        """
+        await self.conn.execute(
+            """
+            REPLACE INTO game_state
+            (id, round)
+            VALUES (?, ?)
+            """,
+            (
+                game_id,
+                round,
+            ),
+        )
+        await self.conn.commit()
+
+    async def get_game_state(self, game_id: int) -> GameState:
+        """Get game state by ID.
+
+        Args:
+            game_id (int): game identifier.
 
         Returns:
-            Dict with game_id, round, phase, alive_agents, eliminated, or None.
+            GameState.
 
-        FIXME: return scheme
+        TODO: test me
 
         """
         cursor = await self.conn.execute(
             """
-            SELECT game_id, round, phase, alive_agents, eliminated
-            FROM game_state WHERE game_id = ?
+            SELECT
+                gs.id as id,
+                gs.round as round,
+                gs.phase as phase,
+                group_concat(
+                    CASE WHEN st.status = 'ALIVE' THEN st.id END, ','
+                ) as alive,
+                group_concat(
+                    CASE WHEN st.status = 'ELIMINATED' THEN st.id END, ','
+                ) as eliminated
+            FROM game_state gs
+            LEFT JOIN agent_states st ON gs.id = st.game_id AND st.role <> 'SYSTEM'
+            WHERE gs.id = ?
+            GROUP BY gs.id
             """,
             (game_id,),
         )
         row = await cursor.fetchone()
 
         if row is None:
-            return None
+            raise ValueError(f'Game not found: {game_id}')
 
-        return {
-            'game_id': row['game_id'],
-            'round': row['round'],
-            'phase': GamePhase(row['phase']),
-            'alive_agents': json.loads(row['alive_agents']),
-            'eliminated': json.loads(row['eliminated']),
-        }
+        # parse CSV strings produced by group_concat (may be None or empty)
+        alive_csv = row['alive']
+        eliminated_csv = row['eliminated']
+
+        alive = [int(x) for x in alive_csv.split(',')] if alive_csv else []
+        eliminated = (
+            [int(x) for x in eliminated_csv.split(',')] if eliminated_csv else []
+        )
+
+        return GameState(
+            game_id=row['id'],
+            round=row['round'],
+            phase=GamePhase(row['phase']),
+            alive=alive,
+            eliminated=eliminated,
+        )
+
+    async def init_agent(self, state: AgentStateIn, game_id: int) -> int:
+        """Insert new agent.
+
+        Args:
+            state (AgentStateIn): AgentState to persist.
+            game_id (int): current game.
+
+        Returns:
+            int: agent ID.
+
+        """
+        cursor = await self.conn.execute(
+            """
+            INSERT INTO agent_states
+            (game_id, role, status, persona_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                game_id,
+                state.role.value,
+                state.status.value,
+                state.persona_id,
+            ),
+        )
+
+        await self.conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    async def update_agent_status(self, agent_id: int, status: AgentStatus) -> None:
+        """Update agent status (ALIVE or ELIMINATED).
+
+        Args:
+            agent_id (int): Agent identifier.
+            status (AgentStatus): New status.
+
+        """
+        await self.conn.execute(
+            'UPDATE agent_states SET status = ? WHERE id = ?',
+            (status.value, agent_id),
+        )
+        await self.conn.commit()
+
+    async def insert_message(self, message: Message) -> int:
+        """Insert agent message
+
+        Args:
+            message (Message): message
+
+        Returns:
+            int: messge ID.
+
+        """
+        cursor = await self.conn.execute(
+            """
+            INSERT INTO agent_messages
+            (sender_id, content, round, phase, target_audience)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                message.sender_id,
+                message.content,
+                message.round,
+                message.phase,
+                message.target_audience.value,
+            ),
+        )
+
+        await self.conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    async def get_message_hystory(self, agent_id: int) -> list[Message]:
+        """Get messages of agent.
+
+        Args:
+            agent_id (int): agent identifier.
+
+        Returns:
+            list[Message]: message hystory.
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT sender_id, content, round, phase, target_audience
+            FROM agent_messages WHERE sender_id = ?
+            ORDER BY id
+            """,
+            (agent_id,),
+        )
+
+        msg_rows = await cursor.fetchall()
+        messages: list[Message] = []
+
+        for mr in msg_rows:
+            msg_dict = {
+                'sender_id': mr['sender_id'],
+                'content': mr['content'],
+                'round': mr['round'],
+                'phase': mr['phase'],
+                'target_audience': mr['target_audience'],
+            }
+            messages.append(Message.model_validate(msg_dict))
+        return messages
+
+    async def get_agent_state(self, agent_id: int) -> AgentStateOut:
+        """Get agent state and messages by ID.
+
+        Args:
+            agent_id (int): agent identifier.
+
+        Returns:
+            AgentStateOut.
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT
+                st.id as id,
+                st.role as role,
+                st.status as status,
+                st.persona_id as persona_id,
+                json_group_array(
+                    CASE WHEN am.id IS NOT NULL THEN
+                        json_object(
+                            'sender_id', am.sender_id,
+                            'content', am.content,
+                            'round', am.round,
+                            'phase', am.phase,
+                            'target_audience', am.target_audience
+                        ) END
+                ) as messages
+            FROM agent_states st
+            LEFT JOIN agent_messages am ON st.id = am.sender_id
+            WHERE st.id = ?
+            GROUP BY st.id
+            """,
+            (agent_id,),
+        )
+        row = await cursor.fetchone()
+
+        if row is None:
+            raise ValueError(f'Agent not found: {agent_id}')
+
+        msgs_json = row['messages']
+        if not msgs_json:
+            messages: list[Message] = []
+        else:
+            try:
+                parsed = json.loads(msgs_json)
+            except Exception:
+                parsed = []
+
+            messages = [Message.model_validate(m) for m in parsed]
+
+        return AgentStateOut(
+            agent_id=row['id'],
+            role=AgentRole(row['role']),
+            persona_id=row['persona_id'],
+            status=AgentStatus(row['status']),
+            message_history=messages,
+        )
+
+    async def get_agents_state(
+        self,
+        game_id: int,
+        status: AgentStatus,
+    ) -> list[AgentStateOut]:
+        """Get states for agents in a game, aggregating messages.
+
+        Args:
+            game_id (int): game identifier.
+
+        Returns:
+            list[AgentStateOut]: states for alive agents in the game.
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT
+                st.id as id,
+                st.role as role,
+                st.status as status,
+                st.persona_id as persona_id,
+                json_group_array(
+                        CASE WHEN am.id IS NOT NULL THEN
+                            json_object(
+                                'sender_id', am.sender_id,
+                                'content', am.content,
+                                'round', am.round,
+                                'phase', am.phase,
+                                'target_audience', am.target_audience
+                            ) END
+                    ) as messages
+                FROM agent_states st
+                LEFT JOIN agent_messages am ON st.id = am.sender_id
+                WHERE st.game_id = ? AND st.status = ? AND st.role <> "SYSTEM"
+            GROUP BY st.id
+            ORDER BY st.id
+            """,
+            (game_id, status.value),
+        )
+
+        rows = await cursor.fetchall()
+        agents: list[AgentStateOut] = []
+
+        for row in rows:
+            msgs_json = row['messages']
+            if not msgs_json:
+                messages: list[Message] = []
+            else:
+                try:
+                    parsed = json.loads(msgs_json)
+                except Exception:
+                    parsed = []
+
+                messages = [Message.model_validate(m) for m in parsed]
+
+            agents.append(
+                AgentStateOut(
+                    agent_id=row['id'],
+                    role=AgentRole(row['role']),
+                    persona_id=row['persona_id'],
+                    status=AgentStatus(row['status']),
+                    message_history=messages,
+                )
+            )
+
+        return agents
+
+    async def get_agents_ids(
+        self,
+        game_id: int,
+        status: AgentStatus,
+    ) -> list[int]:
+        """Get ids for agents in a game.
+
+        Args:
+            game_id (int): game identifier.
+            status (AgentStatus): agent status for filtering.
+
+        Returns:
+            list[int]: ids of agents.
+
+        TODO: test me
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT id
+            FROM agent_states
+            WHERE game_id = ? AND status = ? AND role <> 'SYSTEM'
+            ORDER BY id
+            """,
+            (game_id, status.value),
+        )
+
+        rows = await cursor.fetchall()
+        return [row['id'] for row in rows]
+
+    async def get_mafia_ids(
+        self,
+        game_id: int,
+        status: AgentStatus,
+    ) -> list[int]:
+        """Get ids for mafia agents in a game.
+
+        Args:
+            game_id (int): game identifier.
+            status (AgentStatus): agent status for filtering.
+
+        Returns:
+            list[int]: ids of agents.
+
+        TODO: test me
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT id
+            FROM agent_states
+            WHERE game_id = ? AND status = ? AND role = 'MAFIA'
+            ORDER BY id
+            """,
+            (game_id, status.value),
+        )
+
+        rows = await cursor.fetchall()
+        return [row['id'] for row in rows]
+
+    async def get_agents_count(
+        self,
+        game_id: int,
+        status: AgentStatus,
+    ) -> AgentCount:
+        """Get cityzen and mafia count.
+
+        Args:
+            game_id (int): game identifier.
+            status (AgentStatus): agent status for filtering.
+
+        Returns:
+            AgentCount.
+
+        TODO: test me
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN role = 'MAFIA' THEN 1 ELSE 0 END) AS mafia,
+                SUM(CASE WHEN role = 'CITYZEN' THEN 1 ELSE 0 END) AS cityzen
+            FROM agent_states
+            WHERE game_id = ? AND status = ?
+            """,
+            (game_id, status.value),
+        )
+
+        row = await cursor.fetchone()
+
+        if row is None:
+            return AgentCount(mafia=0, cityzen=0)
+
+        return AgentCount(mafia=row['mafia'], cityzen=row['cityzen'])

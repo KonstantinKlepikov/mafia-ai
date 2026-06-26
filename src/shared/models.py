@@ -4,15 +4,11 @@ from pydantic import BaseModel, Field
 
 
 class AgentRole(str, Enum):
-    """Agent role in the game.
-
-    - `CITIZEN` — regular townsperson
-    - `MAFIA` — mafia member
-
-    """
+    """Agent role in the game."""
 
     CITIZEN = 'CITIZEN'
     MAFIA = 'MAFIA'
+    SYSTEM = 'SESTEM'
 
 
 class GamePhase(str, Enum):
@@ -31,21 +27,6 @@ class GamePhase(str, Enum):
     GAME_OVER = 'GAME_OVER'
 
 
-class PersonaType(str, Enum):
-    """Type of persona"""
-
-    GOOD_NATURED = 'good_natured'
-    HYSTERIC = 'hysteric'
-    CONSPIRACY_THEORIST = 'conspiracy_theorist'
-    ARISTOCRAT = 'aristocrat'
-    HOUSEWIFE = 'housewife'
-    SEDUCTRESS = 'seductress'
-    NEURASTENIC = 'neurasthenic'
-    CLERICALIST = 'clericalist'
-    POETESS = 'poetess'
-    SIMPLETON = 'simpleton'
-
-
 class TargetAudience(str, Enum):
     """Intended audience for a message.
 
@@ -61,18 +42,15 @@ class TargetAudience(str, Enum):
 class Message(BaseModel):
     """Message exchanged via the RabbitMQ broker.
 
-    - `sender_id`: sender identifier, e.g. `agent-1` or `system`
+    - `sender_id`: sender identifier. System identifier is always 1
     - `content`: message text
     - `phase`: game phase when the message was sent
     - `round`: round number (non-negative integer)
     - `target_audience`: intended audience (ALL or MAFIA_ONLY)
-    - `metadata`: optional free-form extra data
-
-    TODO: more concrete and typed metadata
 
     """
 
-    sender_id: str = Field(..., description="Sender ID, e.g. 'agent-1' or 'system'")
+    sender_id: int = Field(..., description='Sender ID, e.g. agent id')
     content: str = Field(..., description='Message text')
     phase: GamePhase = Field(..., description='Game phase when the message was sent')
     round: int = Field(..., ge=0, description='Round number (non-negative integer)')
@@ -80,7 +58,6 @@ class Message(BaseModel):
         TargetAudience.ALL,
         description='Intended audience (ALL or MAFIA_ONLY)',
     )
-    metadata: dict | None = Field(None, description='Optional free-form extra data')
 
 
 class VoteEvent(BaseModel):
@@ -90,8 +67,8 @@ class VoteEvent(BaseModel):
 
     """
 
-    voter_id: str = Field(..., description='ID of the voting agent')
-    target_id: str = Field(..., description='ID of the vote target')
+    voter_id: int = Field(..., description='ID of the voting agent')
+    target_id: int = Field(..., description='ID of the vote target')
     phase: GamePhase = Field(
         ..., description='Phase in which the vote was cast (DAY_VOTE or NIGHT_VOTE)'
     )
@@ -99,40 +76,13 @@ class VoteEvent(BaseModel):
 
 
 class GameState(BaseModel):
-    """Consolidated game state published by the orchestrator.
+    """Consolidated game state published by the orchestrator"""
 
-    - `alive_agents`: IDs of agents still in the game.
-    - `eliminated`: IDs of agents who have been removed.
-
-    """
-
+    game_id: int = Field(..., ge=0, description='Current game ID')
     round: int = Field(..., ge=0, description='Current round number')
     phase: GamePhase = Field(..., description='Current game phase')
-    alive_agents: list[str] = Field(
-        default_factory=list, description='IDs of living agents'
-    )
-    eliminated: list[str] = Field(
-        default_factory=list, description='IDs of eliminated agents'
-    )
-
-
-class AgentState(BaseModel):
-    """Local agent state maintained inside the agent service.
-
-    - `message_history` stores received and sent messages for the current game.
-
-    """
-
-    agent_id: str = Field(..., description='Unique agent identifier')
-    role: AgentRole = Field(..., description='Game role (MAFIA or CITIZEN)')
-    persona_id: str | None = Field(
-        None,
-        description='Persona ID in VectorDB (assigned at game start)',
-    )
-    message_history: list[Message] = Field(
-        default_factory=list,
-        description='History of messages received/sent in the current game',
-    )
+    alive: list[int] = Field(default_factory=list, description='Alive agents')
+    eliminated: list[int] = Field(default_factory=list, description='Eliminated agents')
 
 
 class AgentStatus(str, Enum):
@@ -142,29 +92,61 @@ class AgentStatus(str, Enum):
     ELIMINATED = 'ELIMINATED'
 
 
-class AgentInfo(BaseModel):
-    """Agent information returned by the agent's HTTP API and used by the orchestrator.
+class AgentStateIn(BaseModel):
+    """Agent state for initialisation.
 
-    - `agent_id`: unique agent identifier
-    - `persona_name`: display name from VectorDB persona
-    - `role`: game role (MAFIA or CITIZEN); exposed to the orchestrator and admin panel
-    - `status`: whether the agent is alive or eliminated
-    - `container_id`: Docker container ID; used by the orchestrator
-      to stop the container
+    - 'role'
+    - 'status'
+    - 'persona_id'
 
     """
 
-    agent_id: str = Field(..., description='Unique agent identifier')
-    persona_name: str = Field(..., description='Display name from the VectorDB persona')
     role: AgentRole = Field(..., description='Game role (MAFIA or CITIZEN)')
     status: AgentStatus = Field(
         AgentStatus.ALIVE,
         description='Whether the agent is alive or eliminated',
     )
-    container_id: str | None = Field(
-        None,
-        description='Docker container ID for orchestrator-side container management',
+    persona_id: int = Field(
+        ...,
+        description='Persona ID (assigned at game start)',
     )
+
+
+class AgentStateOut(AgentStateIn):
+    """Local agent state maintained inside the agent service.
+
+    - 'agent_id'
+    - 'role'
+    - 'status'
+    - 'persona_id'
+    - `message_history` stores received and sent messages for the current game.
+
+    """
+
+    agent_id: int = Field(..., description='Numeric unique agent identifier')
+    message_history: list[Message] = Field(
+        default_factory=list,
+        description='History of messages received/sent in the current game',
+    )
+
+
+class Agent(BaseModel):
+    """Agent information returned by the agent's HTTP API and used by the orchestrator.
+
+    - `state`: agent state
+    - `persona`: persona data
+
+    """
+
+    state: AgentStateOut = Field(..., description='Agent state')
+    persona: 'SystemPrompt' = Field(..., description='Persona data')
+
+
+class AgentCount(BaseModel):
+    """Count of mafia nd cityzen"""
+
+    mafia: int = Field(..., description='Mafia count')
+    cityzen: int = Field(..., description='Cityzen count')
 
 
 class HostQuestion(BaseModel):
@@ -175,7 +157,7 @@ class HostQuestion(BaseModel):
     """
 
     question_id: str = Field(..., description='Unique question identifier (UUID)')
-    target_agent_id: str = Field(..., description='ID of the agent being asked')
+    target_agent_id: int = Field(..., description='Numeric ID of the agent being asked')
     question_text: str = Field(..., description='Question text from the host')
 
 
@@ -187,50 +169,17 @@ class AgentAnswer(BaseModel):
     """
 
     question_id: str = Field(..., description='ID of the question being answered')
-    agent_id: str = Field(..., description='ID of the answering agent')
+    agent_id: int = Field(..., description='Numeric ID of the answering agent')
     answer_text: str = Field(..., description='Generated answer text')
 
 
-class AgentInit(BaseModel):
-    """Role-assignment message sent by the orchestrator to a specific agent.
-
-    Published to routing key ``game.init.{agent_id}`` at game start.
-    Each agent receives only its own message via a personalised routing key.
-
-    """
-
-    agent_id: str = Field(..., description='ID of the agent being initialised')
-    role: AgentRole = Field(..., description='Assigned game role (MAFIA or CITIZEN)')
-
-
 class SystemPrompt(BaseModel):
-    """Persona document retrieved from VectorDB.
+    """Persona document retrieved from VectorDB."""
 
-    Mirrors the structure stored by `seed_prompts.py`:
-    - `persona_id` — Chroma document id (UUID)
-    - `name` — persona display name, e.g. `persona_1_good_natured`
-    - `persona_type` — character archetype string, e.g. `good_natured`
-    - `prompt` — full system prompt text sent to the LLM
-
-    """
-
-    persona_id: str = Field(..., description='Chroma document id (UUID)')
+    persona_id: int = Field(..., description='Numeric persona id stored in DB')
     name: str = Field(..., description='Persona display name')
     persona_type: str = Field(..., description='Character archetype')
     prompt: str = Field(..., description='System prompt text for the LLM')
-
-
-class TurnSignal(BaseModel):
-    """Signal from the orchestrator to an agent that it is their turn to act.
-
-    Published to routing key ``game.turn.{agent_id}``.
-    The agent determines the action (speak or vote) from the current game phase.
-
-    """
-
-    agent_id: str = Field(..., description='ID of the agent to act')
-    phase: GamePhase = Field(..., description='Current game phase')
-    round: int = Field(..., ge=0, description='Current round number')
 
 
 class HostDecisionAction(str, Enum):
@@ -239,6 +188,7 @@ class HostDecisionAction(str, Enum):
     APPROVE = 'APPROVE'
     REJECT = 'REJECT'
     OVERRIDE = 'OVERRIDE'
+    NOTHING = 'NOTHING'
 
 
 class HostDecision(BaseModel):
@@ -248,8 +198,11 @@ class HostDecision(BaseModel):
 
     """
 
-    action: HostDecisionAction = Field(..., description='Decision action')
-    target_id: str | None = Field(
+    action: HostDecisionAction = Field(
+        HostDecisionAction.NOTHING,
+        description='Decision action',
+    )
+    target_id: int | None = Field(
         None,
         description='Agent to eliminate; required when action is OVERRIDE',
     )

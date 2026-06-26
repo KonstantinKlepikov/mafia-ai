@@ -3,7 +3,7 @@ from dependency_injector.wiring import Provide, inject
 
 from core.service import Game
 from di_containers import Container
-from shared.models import AgentInfo, GameState, HostDecision, HostDecisionAction
+from shared.models import Agent, GameState, HostDecision, HostDecisionAction
 
 
 class HostDecisionPanel:
@@ -88,7 +88,7 @@ class HostDecisionPanel:
     def update_visibility(
         self,
         game_state: GameState | None,
-        agents: dict[str, AgentInfo],
+        agents: dict[str, Agent],
     ) -> None:
         """Update panel visibility based on game phase."""
         should_show = game_state is not None and game_state.phase == 'HOST_DECISION'

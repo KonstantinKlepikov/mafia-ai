@@ -2,6 +2,11 @@
 # Loaded into SQLite in-memory database at service startup
 
 personas:
+  - id: persona-0
+    name: system
+    type: system
+    prompt: system
+
   - id: persona-1
     name: persona_1_good_natured
     type: good_natured
@@ -106,12 +111,12 @@ personas:
 game_prompts:
   night_speak: |
     It is nighttime. Discuss with your fellow mafia members who to eliminate. Speak as your character.
-  
+
   day_speak: |
     Share your thoughts on who might be the mafia. Speak as your character.
-  
+
   vote_template: |
     It is time to vote. Living players: {candidates}. Choose one player to {vote_action}. Respond with ONLY the player ID from the list above, nothing else.
-  
+
   host_question_template: |
     The host asks you: "{question_text}". Answer in character, concisely.

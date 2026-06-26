@@ -3,7 +3,7 @@ from dependency_injector.wiring import Provide, inject
 
 from core.service import Game
 from di_containers import Container
-from shared.models import AgentInfo
+from shared.models import Agent
 
 
 class AskAgentPanel:
@@ -49,7 +49,7 @@ class AskAgentPanel:
             expand=True,
         )
 
-    def update_agents(self, agents: dict[str, AgentInfo]) -> None:
+    def update_agents(self, agents: dict[str, Agent]) -> None:
         """Update available agents dropdown."""
         if not agents:
             self._agent_dropdown.options = []

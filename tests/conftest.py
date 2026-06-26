@@ -62,7 +62,8 @@ def ui_settings() -> AdminFletSettings:
 async def db(settings: MafiaServiceSettings) -> AsyncGenerator[Database, None]:
     """Override settings"""
     async with DbContextManager(Database()) as db:
-        await db.init_from_yaml(settings.db_yaml_path)
+        personas_id = await db.init_personas_from_yaml(settings.db_yaml_path)
+        assert len(personas_id) == 11, 'wrong personas inited'
         yield db
 
 

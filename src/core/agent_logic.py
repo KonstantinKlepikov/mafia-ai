@@ -21,7 +21,7 @@ class AgentLogic:
     Does NOT handle RabbitMQ or HTTP endpoints - pure business logic.
 
     Args:
-        agent_id: Unique agent identifier (e.g. 'agent-1').
+        agent_id: Numeric unique agent identifier.
         persona: SystemPrompt with character details.
         llm: LLM service for direct local inference.
         db: Database instance for state persistence.
@@ -30,7 +30,7 @@ class AgentLogic:
 
     def __init__(
         self,
-        agent_id: str,
+        agent_id: int,
         persona: SystemPrompt,
         llm: LLM,
         db: Database,
@@ -84,7 +84,7 @@ class AgentLogic:
             target_audience=target_audience,
         )
         state.message_history.append(message)
-        await self._db.update_agent_state(self._agent_id, state)
+        await self._db.update_agent_state(state=state)
 
         logger.info(
             f'Agent {self._agent_id} generated message for phase {phase}: '
@@ -92,18 +92,12 @@ class AgentLogic:
         )
         return text
 
-    async def generate_vote(
-        self,
-        candidates: list[str],
-        is_night: bool,
-        game_round: int,
-    ) -> str:
+    async def generate_vote(self, candidates: list[int], is_night: bool) -> int:
         """Generate a vote for elimination.
 
         Args:
             candidates: List of alive agent IDs (excluding self).
             is_night: True for night vote, False for day vote.
-            game_round: Current round number.
 
         Returns:
             Target agent ID to vote for.
@@ -116,7 +110,7 @@ class AgentLogic:
             'eliminate at night' if is_night else 'vote to eliminate during the day'
         )
         extra_prompt = (
-            f'It is time to vote. Living players: {", ".join(candidates)}. '
+            f'It is time to vote. Living players: {", ".join(map(str, candidates))}. '
             f'Choose one player to {vote_action}. '
             'Respond with ONLY the player ID from the list above, nothing else.'
         )
@@ -127,7 +121,12 @@ class AgentLogic:
             logger.error(f'Agent {self._agent_id} LLM call failed for vote: {exc}')
             raw = ''
 
-        target_id = raw.strip()
+        target_id_raw = raw.strip()
+        try:
+            target_id = int(target_id_raw)
+        except Exception:
+            target_id = None
+
         if target_id not in candidates:
             target_id = random.choice(candidates)
             logger.warning(
@@ -180,7 +179,7 @@ class AgentLogic:
             return
 
         state.message_history.append(message)
-        await self._db.update_agent_state(self._agent_id, state)
+        await self._db.update_agent_state(state=state)
 
         logger.debug(
             f'Agent {self._agent_id} added message from {message.sender_id} to history'

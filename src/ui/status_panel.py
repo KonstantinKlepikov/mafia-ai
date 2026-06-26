@@ -1,6 +1,6 @@
 import flet as ft
 
-from shared.models import AgentInfo, GameState
+from shared.models import Agent, GameState
 
 
 class StatusPanel:
@@ -24,7 +24,7 @@ class StatusPanel:
             border=ft.Border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
-        self._agent_cache: dict[str, AgentInfo] = {}
+        self._agent_cache: dict[str, Agent] = {}
 
     def build(self) -> ft.Control:
         """Return Flet control for this component."""
@@ -69,7 +69,7 @@ class StatusPanel:
     def update_state(
         self,
         game_state: GameState | None,
-        agents: dict[str, AgentInfo],
+        agents: dict[str, Agent],
     ) -> None:
         """Update status panel with new game state."""
         if game_state is None:
@@ -108,6 +108,6 @@ class StatusPanel:
         self._alive_text.update()
         self._agents_table.update()
 
-    def get_agent_cache(self) -> dict[str, AgentInfo]:
+    def get_agent_cache(self) -> dict[str, Agent]:
         """Return cached agent information."""
         return self._agent_cache
