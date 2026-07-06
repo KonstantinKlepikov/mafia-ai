@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from config import AdminFletSettings, MafiaServiceSettings
+from data.database import Database
 from di_containers import Container
-from shared.database import Database
-from shared.models import GamePhase, GameState
+from schemas.game_schemas import GamePhase, GameState
 from ui.main_app import MafiaAdminApp
 
 
@@ -62,7 +62,7 @@ def ui_settings() -> AdminFletSettings:
 async def db(settings: MafiaServiceSettings) -> AsyncGenerator[Database, None]:
     """Override settings"""
     async with DbContextManager(Database()) as db:
-        personas_id = await db.init_personas_from_yaml(settings.db_yaml_path)
+        personas_id = await db.init_from_yaml(settings.db_yaml_path)
         assert len(personas_id) == 11, 'wrong personas inited'
         yield db
 

@@ -7,21 +7,21 @@ from dataclasses import dataclass
 from loguru import logger
 
 from config import MafiaServiceSettings
-from llm.service import LLM
-from shared.database import Database
-from shared.exceptions import EmptySharingException
-from shared.models import (
+from data import Database
+from llm.llm import LLM
+from schemas import (
     Agent,
     AgentAnswer,
     AgentRole,
     AgentStateIn,
     AgentStatus,
+    EmptySharingException,
     GamePhase,
     GameState,
     HostDecision,
     HostDecisionAction,
     Message,
-    SystemPrompt,
+    Persona,
     VoteEvent,
 )
 
@@ -34,33 +34,38 @@ class AgentManager:
     """Manages all AI agents in a single process.
 
     Args:
-        llm: LLM service for direct local inference.
-        db: Database instance with personas and state storage.
+        llm (LLM): LLM service for direct local inference.
+        db (Database): Database instance with personas and state storage.
+        game_id(int): current game id.
 
     """
 
-    def __init__(self, llm: LLM, db: Database, game_id: int) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        db: Database,
+        settings: MafiaServiceSettings,
+        game_id: int,
+    ) -> None:
         self.llm = llm
         self.db = db
-        self._agents: dict[int, AgentLogic] = {}
+        self.agents: dict[int, AgentLogic] = {}
         self.game_id = game_id
+        self.settings = settings
 
-    async def initialize_agent(
-        self,
-        state: AgentStateIn,
-        persona: SystemPrompt,
-    ) -> int:
+    async def initialize_agent(self, state: AgentStateIn, persona: Persona) -> int:
         """Initialize a new agent.
 
         TODO: test me
 
         """
         agent_id = await self.db.init_agent(state=state, game_id=self.game_id)
-        self._agents[agent_id] = AgentLogic(
+        self.agents[agent_id] = AgentLogic(
             agent_id=agent_id,
             persona=persona,
             llm=self.llm,
             db=self.db,
+            settings=self.settings,
         )
         logger.info(
             f'Agent {agent_id} initialized with '
@@ -69,32 +74,47 @@ class AgentManager:
         return agent_id
 
     async def eliminate_agent(self, agent_id: int) -> None:
-        """Mark agent as eliminated (remove from active agents)."""
-        if agent_id not in self._agents:
-            logger.warning(f'Attempted to eliminate non-initialized agent {agent_id}')
-            return
+        """Mark agent as eliminated (remove from active agents).
 
-        await self.db.update_agent_status(agent_id, AgentStatus.ELIMINATED)
-        del self._agents[agent_id]
+        Raises:
+            KeyError: agent id not found.
 
-        logger.info(f'Agent {agent_id} eliminated and removed')
+        TODO: test me
 
-    async def generate_message(self, agent_id: int, phase: str, game_round: int) -> str:
-        """Generate a message for the current phase."""
-        if agent_id not in self._agents:
-            raise ValueError(f'Agent {agent_id} not initialized')
+        """
+        del self.agents[agent_id]
+        await self.db.update_agent_status(
+            agent_id=agent_id,
+            status=AgentStatus.ELIMINATED,
+        )
+        logger.info(f'Agent {agent_id} eliminated and removed from AgentLogic')
 
-        agent = self._agents[agent_id]
-        phase_enum = GamePhase(phase)
-        return await agent.generate_message(phase_enum, game_round)
+    async def generate_message(
+        self, agent_id: int, phase: GamePhase, game_round: int
+    ) -> str:
+        """Generate a message for the current phase.
+
+        Raises:
+            KeyError: agent id not found.
+
+        TODO: test me
+
+        """
+        return await self.agents[agent_id].generate_message(
+            phase=phase,
+            game_round=game_round,
+        )
 
     async def answer_question(self, agent_id: int, question_text: str) -> str:
-        """Generate answer to host question."""
-        if agent_id not in self._agents:
-            raise ValueError(f'Agent {agent_id} not initialized')
+        """Generate answer to host question.
 
-        agent = self._agents[agent_id]
-        return await agent.answer_question(question_text)
+        Raises:
+            KeyError: agent id not found.
+
+        TODO: test me
+
+        """
+        return await self.agents[agent_id].answer_question(question_text)
 
 
 @dataclass
@@ -102,7 +122,7 @@ class Shared:
     """Cached and shared data of game"""
 
     # Game state
-    all_personas: dict[int, SystemPrompt]
+    all_personas: dict[int, Persona]
     game_id: int
     system_agent_id: int
     mafia_agents_ids: list[int]
@@ -149,7 +169,7 @@ class Game:
         event_bus: EventBus,
         db: Database,
     ) -> None:
-        self._settings = settings
+        self.settings = settings
         self.db = db
         self.llm = llm
         self.event_bus = event_bus
@@ -172,34 +192,6 @@ class Game:
         if self._shared and not self._shared.game_task.done():
             self._shared.game_task.cancel()
         self._shared = None
-
-    async def start(self) -> None:
-        """Asyncronously start all services before begin game
-
-        TODO: test me
-
-        """
-        try:
-            await self.stop()
-            await self.llm.start()
-            await self.db.connect()
-            # CHECK: init personas once at the db connect
-            await self.db.init_personas_from_yaml(self._settings.db_yaml_path)
-            logger.info('Game engine started')
-        except Exception as exc:
-            logger.error(f'Game engine failed to start: {exc.__str__()}')
-            raise
-
-    async def stop(self) -> None:
-        """Stop all game services
-
-        TODO: test me
-
-        """
-        await self.end_game()
-        await self.db.close()
-        await self.llm.stop()
-        logger.info('Game engine stopped')
 
     async def begin_game(self) -> None:
         """Initialise roles/personas and launch the game loop.
@@ -225,6 +217,7 @@ class Game:
             llm=self.llm,
             db=self.db,
             game_id=game_id,
+            settings=self.settings,
         )
 
         # roles
@@ -470,7 +463,7 @@ class Game:
                 if self._check_and_handle_win():
                     break
 
-                await self.db.update_round(
+                await self.db.update_game_round(
                     game_id=self.shared.game_id,
                     round=game_state.round + 1,
                 )
@@ -541,7 +534,7 @@ class Game:
             return
 
         per_agent_timeout = max(
-            self._settings.phase_duration_seconds / len(targets),
+            self.settings.phase_duration_seconds / len(targets),
             5.0,
         )
 
@@ -551,7 +544,7 @@ class Game:
                 message_text = await asyncio.wait_for(
                     self.shared.agent_manager.generate_message(
                         agent_id,
-                        game_state.phase.value,
+                        game_state.phase,
                         game_state.round,
                     ),
                     timeout=per_agent_timeout,
@@ -606,7 +599,7 @@ class Game:
         self._drain_vote_queue()
         votes: list[VoteEvent] = []
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._settings.vote_timeout_seconds
+        deadline = loop.time() + self.settings.vote_timeout_seconds
 
         while len(votes) < expected:
             remaining = deadline - loop.time()

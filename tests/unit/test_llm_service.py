@@ -1,11 +1,10 @@
 import pytest
 from pydantic import ValidationError
 
-from llm.schemas.llm_schemas import (
+from schemas.llm_schemas import (
     GenerateRequest,
     GenerateResponse,
     MessageItem,
-    ResetResponse,
     Usage,
 )
 
@@ -75,28 +74,3 @@ class TestGenerateRequest:
         assert [m.content for m in req.messages] == ['first', 'second'], (
             'messages must be stored in insertion order'
         )
-
-
-class TestUsageModel:
-    """Test Usage model computation."""
-
-    def test_total_tokens_computed_correctly(self) -> None:
-        """Test Usage total_tokens equals prompt + completion."""
-        usage = Usage(prompt_tokens=7, completion_tokens=3, total_tokens=10)
-        assert usage.total_tokens == 10, (
-            'total_tokens must equal prompt_tokens + completion_tokens'
-        )
-
-
-class TestResetResponse:
-    """Test ResetResponse model."""
-
-    def test_default_status_is_ok(self) -> None:
-        """Test ResetResponse default status is 'ok'."""
-        resp = ResetResponse()
-        assert resp.status == 'ok', "default status must be 'ok'"
-
-    def test_custom_status_accepted(self) -> None:
-        """Test custom status string is stored correctly."""
-        resp = ResetResponse(status='cleared')
-        assert resp.status == 'cleared', 'custom status must be stored'

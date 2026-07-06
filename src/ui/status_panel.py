@@ -1,6 +1,6 @@
 import flet as ft
 
-from shared.models import Agent, GameState
+from schemas import Agent, GameState
 
 
 class StatusPanel:

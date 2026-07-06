@@ -1,6 +1,6 @@
 from collections import Counter
 
-from shared.models import VoteEvent
+from schemas import VoteEvent
 
 
 def resolve_votes(votes: list[VoteEvent]) -> int | None:

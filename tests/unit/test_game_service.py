@@ -4,16 +4,16 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-import core.service as svc_module
+import core.game as svc_module
 from config import MafiaServiceSettings
-from core.service import Game
-from llm.service import LLM
-from shared.models import (
+from core.game import Game
+from llm.llm import LLM
+from schemas import (
     GamePhase,
     HostDecision,
     HostDecisionAction,
     Message,
-    SystemPrompt,
+    Persona,
     TargetAudience,
     VoteEvent,
 )
@@ -38,8 +38,8 @@ def _make_settings(**kwargs: object) -> MafiaServiceSettings:
     return MafiaServiceSettings(**defaults)  # type: ignore[arg-type]
 
 
-def _make_persona(n: int) -> SystemPrompt:
-    return SystemPrompt(
+def _make_persona(n: int) -> Persona:
+    return Persona(
         persona_id=f'persona-{n}',
         name=f'persona_{n}',
         persona_type=PersonaType.GOOD_NATURED,
@@ -99,7 +99,7 @@ def mock_llm() -> AsyncMock:
     mock_service.stop = AsyncMock()
 
     # Mock generate response
-    from llm.schemas.llm_schemas import GenerateResponse, Usage
+    from schemas.llm_schemas import GenerateResponse, Usage
 
     mock_response = GenerateResponse(
         text='Hello, I am a test agent!',

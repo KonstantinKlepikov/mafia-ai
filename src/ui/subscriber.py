@@ -5,7 +5,7 @@ from enum import Enum
 from loguru import logger
 
 from core.event_bus import EventBus, EventType
-from shared.models import AgentAnswer, Message, VoteEvent
+from schemas import AgentAnswer, Message, VoteEvent
 
 
 class EventKind(str, Enum):

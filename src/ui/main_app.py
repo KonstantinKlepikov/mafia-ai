@@ -5,9 +5,9 @@ from dependency_injector.wiring import Provide, inject
 from loguru import logger
 
 from config import AdminFletSettings, MafiaServiceSettings
-from core.service import Game
+from core.game import Game
 from di_containers import Container
-from shared.models import AgentAnswer, Message, VoteEvent
+from schemas import AgentAnswer, Message, VoteEvent
 
 from .ask_agent_panel import AskAgentPanel
 from .game_controls import GameControls
@@ -46,8 +46,8 @@ class MafiaAdminApp:
     ) -> None:
         self.settings = settings
         self.ui_settings = ui_settings
-        self._subscriber = subscriber
-        self._game: Game = game
+        self.subscriber = subscriber
+        self.game: Game = game
 
     async def start(self, page: ft.Page) -> None:
         """Initialize and start the application."""
@@ -57,13 +57,10 @@ class MafiaAdminApp:
         page.width = self.ui_settings.window_width
         page.height = self.ui_settings.window_height
 
-        await self._game.start()
-        await self._subscriber.start()
-
         self._message_feed = MessageFeed()
         self._status_panel = StatusPanel()
 
-        self._game_controls = GameControls(on_game_started=self._on_game_started)
+        self.game_controls = GameControls(on_game_started=self._on_game_started)
         self._ask_agent_panel = AskAgentPanel(
             get_agents_fn=self._status_panel.get_agent_cache
         )
@@ -87,7 +84,7 @@ class MafiaAdminApp:
         )
 
         col_controls = ft.Column(
-            controls=[self._game_controls.build()],
+            controls=[self.game_controls.build()],
             expand=1,
         )
         col_ask = ft.Column(
@@ -133,9 +130,6 @@ class MafiaAdminApp:
                 await self._update_task
             except asyncio.CancelledError:
                 pass
-
-        await self._subscriber.stop()
-        await self._game.stop()
         logger.info('MafiaAdminApp stopped')
 
     async def _update_loop(self) -> None:
@@ -151,11 +145,11 @@ class MafiaAdminApp:
 
     async def _update_ui(self) -> None:
         """Update UI with latest data from game service and event bus."""
-        if not self._subscriber:
+        if not self.subscriber:
             return
 
-        game_state = self._game.get_game_state()
-        agents = await self._game.get_agents_info()
+        game_state = self.game.get_game_state()
+        agents = await self.game.get_agents_info()
 
         self._status_panel.update_state(game_state, agents)
 
@@ -165,7 +159,7 @@ class MafiaAdminApp:
         if self._host_decision_panel:
             self._host_decision_panel.update_visibility(game_state, agents)
 
-        events = self._subscriber.get_events()
+        events = self.subscriber.get_events()
         for event in events:
             try:
                 if event.kind == EventKind.MESSAGE:
@@ -183,10 +177,10 @@ class MafiaAdminApp:
     async def _on_game_started(self) -> None:
         """Handle game started event."""
         self._message_feed.clear()
-        if self._game_controls:
-            self._game_controls.add_log_entry('Game started')
+        if self.game_controls:
+            self.game_controls.add_log_entry('Game started')
 
     async def _on_host_decision(self, log_msg: str) -> None:
         """Handle host decision event."""
-        if self._game_controls:
-            self._game_controls.add_log_entry(log_msg)
+        if self.game_controls:
+            self.game_controls.add_log_entry(log_msg)

@@ -7,11 +7,13 @@ from ui.main_app import MafiaAdminApp
 
 def main() -> None:
     """Start the Flet UI application with unified service."""
+    container = Container()
     app = MafiaAdminApp()
 
     async def flet_main(page: ft.Page) -> None:
         """Flet application entry point."""
         try:
+            await container.init_game_engine()
             await app.start(page)
             # Keep the page alive
             page.on_disconnect = lambda _: None
@@ -27,5 +29,5 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    container = Container()
+    # container = Container()
     main()

@@ -8,9 +8,10 @@ import aiofiles
 import aiosqlite
 import yaml
 from aiofiles import os as aos
+from async_lru import alru_cache
 from loguru import logger
 
-from .models import (
+from schemas import (
     AgentCount,
     AgentRole,
     AgentStateIn,
@@ -19,7 +20,8 @@ from .models import (
     GamePhase,
     GameState,
     Message,
-    SystemPrompt,
+    Persona,
+    SystemPromptKey,
 )
 
 
@@ -135,9 +137,28 @@ class Database:
             """
         )
 
+        # store system prompts separately (id, text)
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_prompts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL,
+                text TEXT NOT NULL
+            )
+            """
+        )
+
+        # index on key for quick lookup
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_system_prompts_key
+            ON system_prompts(key)
+            """
+        )
+
         await conn.commit()
 
-    async def init_personas_from_yaml(self, yaml_path: Path) -> list[int]:
+    async def init_from_yaml(self, yaml_path: Path) -> list[int]:
         """Load personas from YAML config into database. System is olways first.
 
         Args:
@@ -147,7 +168,7 @@ class Database:
             FileNotFoundError: If yaml_path does not exist.
 
         Returns:
-            ;ist[int]: list of personas ids
+            list[int]: list of personas ids
 
         """
         if not await aos.path.exists(yaml_path):
@@ -174,12 +195,51 @@ class Database:
             )
             inserted_ids.append(cursor.lastrowid)  # type: ignore[arg-type]
 
+        # insert system prompts (game prompts) into system_prompts table
+        game_prompts = config.get('game_prompts', {}) or {}
+        for k, v in game_prompts.items():
+            await self.conn.execute(
+                """
+                INSERT INTO system_prompts (key, text)
+                VALUES (?, ?)
+                """,
+                (k, v),
+            )
+
         await self.conn.commit()
-        logger.info(f'Loaded {len(inserted_ids)} personas from {yaml_path}')
+        logger.info(
+            f'Loaded {len(inserted_ids)} personas and {len(game_prompts)} '
+            f' system prompts from {yaml_path}'
+        )
 
         return inserted_ids
 
-    async def get_persona(self, persona_id: int) -> SystemPrompt:
+    @alru_cache
+    async def get_system_prompt(self, key: SystemPromptKey) -> str:
+        """Retrieve system prompt text by key.
+
+        Args:
+            key (SystemPromptKey): key of system prompt
+
+        Raises:
+            ValueError: prompt with given key is not found.
+
+        TODO: test me
+
+        """
+        cursor = await self.conn.execute(
+            'SELECT text FROM system_prompts WHERE key = ?',
+            (key.value,),
+        )
+        row = await cursor.fetchone()
+
+        if row is None:
+            raise ValueError(f'System prompt not found: {key.value}')
+
+        return row['text']
+
+    @alru_cache
+    async def get_persona(self, persona_id: int) -> Persona:
         """Retrieve a persona by ID.
 
         Args:
@@ -189,7 +249,7 @@ class Database:
             ValueError: If persona not found.
 
         Returns:
-            SystemPrompt
+            Persona
 
         """
 
@@ -202,18 +262,19 @@ class Database:
         if row is None:
             raise ValueError(f'Persona not found: {persona_id}')
 
-        return SystemPrompt(
+        return Persona(
             persona_id=row['id'],
             name=row['name'],
             persona_type=row['type'],
             prompt=row['prompt'],
         )
 
-    async def get_personas(self) -> list[SystemPrompt]:
+    @alru_cache
+    async def get_personas(self) -> list[Persona]:
         """Return all personas in database.
 
         Returns:
-            list[SystemPrompt]: List of SystemPrompt objects.
+            list[Persona]: List of Persona objects.
 
         """
 
@@ -223,7 +284,7 @@ class Database:
         rows = await cursor.fetchall()
 
         return [
-            SystemPrompt(
+            Persona(
                 persona_id=row['id'],
                 name=row['name'],
                 persona_type=row['type'],
@@ -283,43 +344,50 @@ class Database:
             game_id: Game identifier.
             phase: Current game phase.
 
-        TODO: test me
+        Raises:
+            ValueError: no one row updated
 
         """
-        await self.conn.execute(
+        cursor = await self.conn.execute(
             """
-            REPLACE INTO game_state
-            (id, phase)
-            VALUES (?, ?)
+            UPDATE game_state
+            SET phase = ?
+            WHERE id = ?
             """,
             (
-                game_id,
                 phase.value,
+                game_id,
             ),
         )
+        if cursor.rowcount == 0:
+            raise ValueError(f'Game not found: {game_id}')
         await self.conn.commit()
 
-    async def update_round(self, game_id: int, round: int) -> None:
+    async def update_game_round(self, game_id: int, round: int) -> None:
         """Update game state.
 
         Args:
             game_id: Game identifier.
-            round_num: Current round number.
+            round: Current round number.
 
-        TODO: test me
+        Raises:
+            ValueError: no one row updated
 
         """
-        await self.conn.execute(
+        logger.debug(round)
+        cursor = await self.conn.execute(
             """
-            REPLACE INTO game_state
-            (id, round)
-            VALUES (?, ?)
+            UPDATE game_state
+            SET round = ?
+            WHERE id = ?
             """,
             (
-                game_id,
                 round,
+                game_id,
             ),
         )
+        if cursor.rowcount == 0:
+            raise ValueError(f'Game not found: {game_id}')
         await self.conn.commit()
 
     async def get_game_state(self, game_id: int) -> GameState:
@@ -330,8 +398,6 @@ class Database:
 
         Returns:
             GameState.
-
-        TODO: test me
 
         """
         cursor = await self.conn.execute(
@@ -358,7 +424,7 @@ class Database:
         if row is None:
             raise ValueError(f'Game not found: {game_id}')
 
-        # parse CSV strings produced by group_concat (may be None or empty)
+        # parse strings produced by group_concat
         alive_csv = row['alive']
         eliminated_csv = row['eliminated']
 

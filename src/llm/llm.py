@@ -1,5 +1,3 @@
-# FIXME: remove me
-
 import asyncio
 import json
 import subprocess
@@ -8,16 +6,26 @@ from typing import Any
 from loguru import logger
 
 from config import MafiaServiceSettings
-from schemas.llm_schemas import GenerateRequest, GenerateResponse, Usage
+from schemas import GenerateRequest, GenerateResponse, Usage
 
 from .resource_detection import calculate_pool_size, detect_hardware
 
 
-class OllamaRunner:
-    """Executes Ollama model inference via subprocess."""
+class LLM:
+    """Local Ollama inference via subprocess.
+
+    Uses OllamaRunner for direct model execution without HTTP overhead.
+    """
 
     def __init__(self, settings: MafiaServiceSettings) -> None:
+        """Initialize LLM service with OllamaRunner.
+
+        Args:
+            settings: Unified service settings.
+
+        """
         self.settings = settings
+
         pool_size = settings.llm_pool_size
         if settings.llm_pool_size == 0:
             hardware = detect_hardware()
@@ -30,7 +38,7 @@ class OllamaRunner:
         self._semaphore = asyncio.Semaphore(self._pool_size)
 
         logger.info(
-            f'OllamaRunner initialized: {self._pool_size} concurrent '
+            f'LLM initialized: {self._pool_size} concurrent '
             f'processes for {settings.ollama_model}, timeout={settings.ollama_timeout}s'
         )
 

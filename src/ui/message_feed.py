@@ -1,6 +1,6 @@
 import flet as ft
 
-from shared.models import AgentAnswer, Message, TargetAudience, VoteEvent
+from schemas import AgentAnswer, Message, TargetAudience, VoteEvent
 
 
 class MessageFeed:

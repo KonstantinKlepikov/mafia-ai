@@ -64,6 +64,35 @@ typing_extensions = {version = ">=4.5", markers = "python_version < \"3.13\""}
 trio = ["trio (>=0.31.0) ; python_version < \"3.10\"", "trio (>=0.32.0) ; python_version >= \"3.10\""]
 
 [[package]]
+name = "async-lru"
+version = "2.3.0"
+description = "Simple LRU cache for asyncio"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "async_lru-2.3.0-py3-none-any.whl", hash = "sha256:eea27b01841909316f2cc739807acea1c623df2be8c5cfad7583286397bb8315"},
+    {file = "async_lru-2.3.0.tar.gz", hash = "sha256:89bdb258a0140d7313cf8f4031d816a042202faa61d0ab310a0a538baa1c24b6"},
+]
+
+[[package]]
+name = "asyncstdlib"
+version = "3.14.0"
+description = "The missing async toolbox"
+optional = false
+python-versions = "~=3.8"
+groups = ["main"]
+files = [
+    {file = "asyncstdlib-3.14.0-py3-none-any.whl", hash = "sha256:cad90c590ce357da6e70c56f0e2ad9e9baaf146a8fc2ede189879da57eb8bd87"},
+    {file = "asyncstdlib-3.14.0.tar.gz", hash = "sha256:f99396992a3bba7495d8cf6c832bfe8c8727f61213233d3569a5a9cbd1c04385"},
+]
+
+[package.extras]
+doc = ["sphinx", "sphinxcontrib-trio"]
+test = ["black ; implementation_name == \"cpython\"", "coverage", "flake8", "flake8-2020", "flake8-bugbear", "mypy ; implementation_name == \"cpython\"", "pytest", "pytest-cov"]
+typetest = ["mypy ; implementation_name == \"cpython\"", "pyright", "typing-extensions"]
+
+[[package]]
 name = "attrs"
 version = "26.1.0"
 description = "Classes Without Boilerplate"
@@ -2145,4 +2174,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "070fa914fb643d978ce9b5f6123691ca856bc132201036fd55183bfd68b89e7c"
+content-hash = "616fdaed76c6499d8a8db7c3eb19af05485708c90cc10429fe1e5c14f5f38252"

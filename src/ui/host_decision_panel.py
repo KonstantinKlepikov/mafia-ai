@@ -1,9 +1,9 @@
 import flet as ft
 from dependency_injector.wiring import Provide, inject
 
-from core.service import Game
+from core.game import Game
 from di_containers import Container
-from shared.models import Agent, GameState, HostDecision, HostDecisionAction
+from schemas import Agent, GameState, HostDecision, HostDecisionAction
 
 
 class HostDecisionPanel:

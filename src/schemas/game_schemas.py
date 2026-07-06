@@ -1,42 +1,12 @@
-from enum import Enum
-
 from pydantic import BaseModel, Field
 
-
-class AgentRole(str, Enum):
-    """Agent role in the game."""
-
-    CITIZEN = 'CITIZEN'
-    MAFIA = 'MAFIA'
-    SYSTEM = 'SESTEM'
-
-
-class GamePhase(str, Enum):
-    """Game cycle phase.
-
-    Includes intermediate states for voting rounds and game-over.
-
-    """
-
-    NIGHT = 'NIGHT'
-    NIGHT_VOTE = 'NIGHT_VOTE'
-    RESOLVE_NIGHT = 'RESOLVE_NIGHT'
-    DAY = 'DAY'
-    DAY_VOTE = 'DAY_VOTE'
-    HOST_DECISION = 'HOST_DECISION'
-    GAME_OVER = 'GAME_OVER'
-
-
-class TargetAudience(str, Enum):
-    """Intended audience for a message.
-
-    - `ALL`: all living agents
-    - `MAFIA_ONLY`: mafia members only
-
-    """
-
-    ALL = 'ALL'
-    MAFIA_ONLY = 'MAFIA_ONLY'
+from schemas.enums import (
+    AgentRole,
+    AgentStatus,
+    GamePhase,
+    HostDecisionAction,
+    TargetAudience,
+)
 
 
 class Message(BaseModel):
@@ -83,13 +53,6 @@ class GameState(BaseModel):
     phase: GamePhase = Field(..., description='Current game phase')
     alive: list[int] = Field(default_factory=list, description='Alive agents')
     eliminated: list[int] = Field(default_factory=list, description='Eliminated agents')
-
-
-class AgentStatus(str, Enum):
-    """Current container/game status of an agent."""
-
-    ALIVE = 'ALIVE'
-    ELIMINATED = 'ELIMINATED'
 
 
 class AgentStateIn(BaseModel):
@@ -139,7 +102,7 @@ class Agent(BaseModel):
     """
 
     state: AgentStateOut = Field(..., description='Agent state')
-    persona: 'SystemPrompt' = Field(..., description='Persona data')
+    persona: 'Persona' = Field(..., description='Persona data')
 
 
 class AgentCount(BaseModel):
@@ -173,22 +136,13 @@ class AgentAnswer(BaseModel):
     answer_text: str = Field(..., description='Generated answer text')
 
 
-class SystemPrompt(BaseModel):
-    """Persona document retrieved from VectorDB."""
+class Persona(BaseModel):
+    """Persona document retrieved."""
 
     persona_id: int = Field(..., description='Numeric persona id stored in DB')
     name: str = Field(..., description='Persona display name')
     persona_type: str = Field(..., description='Character archetype')
     prompt: str = Field(..., description='System prompt text for the LLM')
-
-
-class HostDecisionAction(str, Enum):
-    """Possible actions a host can take at the HOST_DECISION phase."""
-
-    APPROVE = 'APPROVE'
-    REJECT = 'REJECT'
-    OVERRIDE = 'OVERRIDE'
-    NOTHING = 'NOTHING'
 
 
 class HostDecision(BaseModel):

@@ -9,7 +9,7 @@ from llm.resource_detection import (
     calculate_pool_size,
     detect_hardware,
 )
-from llm.schemas.llm_schemas import (
+from schemas.llm_schemas import (
     GenerateRequest,
     MessageItem,
 )
@@ -164,7 +164,7 @@ class TestOllamaRunner:
         )
 
         # Mock subprocess execution - return GenerateResponse
-        from llm.schemas.llm_schemas import (
+        from schemas.llm_schemas import (
             GenerateResponse,
             Usage,
         )
@@ -203,7 +203,7 @@ class TestOllamaRunner:
         )
 
         # Mock subprocess with JSON response
-        from llm.schemas.llm_schemas import (
+        from schemas.llm_schemas import (
             GenerateResponse,
             Usage,
         )
@@ -239,7 +239,7 @@ class TestOllamaRunner:
         )
 
         # Mock subprocess
-        from llm.schemas.llm_schemas import (
+        from schemas.llm_schemas import (
             GenerateResponse,
             Usage,
         )

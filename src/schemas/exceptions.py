@@ -13,4 +13,8 @@ class RootException(Exception):
 
 
 class EmptySharingException(RootException):
-    """Empty Sharing class"""
+    """Empty sharing error"""
+
+
+class VotingError(RootException):
+    """Voting error"""
