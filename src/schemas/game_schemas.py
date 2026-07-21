@@ -106,10 +106,10 @@ class Agent(BaseModel):
 
 
 class AgentCount(BaseModel):
-    """Count of mafia nd cityzen"""
+    """Count of mafia nd citizen"""
 
     mafia: int = Field(..., description='Mafia count')
-    cityzen: int = Field(..., description='Cityzen count')
+    citizen: int = Field(..., description='Citizen count')
 
 
 class HostQuestion(BaseModel):

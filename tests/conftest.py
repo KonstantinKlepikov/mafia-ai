@@ -67,6 +67,14 @@ async def db(settings: MafiaServiceSettings) -> AsyncGenerator[Database, None]:
         yield db
 
 
+@pytest.fixture(scope='function')
+async def game_id(db: Database) -> int:
+    """Override settings"""
+    game_id = await db.init_game()
+    assert game_id == 1, 'wrong game id'
+    return game_id
+
+
 @pytest.fixture(scope='session')
 def container(
     settings: MafiaServiceSettings,

@@ -224,8 +224,6 @@ class Database:
         Raises:
             ValueError: prompt with given key is not found.
 
-        TODO: test me
-
         """
         cursor = await self.conn.execute(
             'SELECT text FROM system_prompts WHERE key = ?',
@@ -683,8 +681,6 @@ class Database:
         Returns:
             list[int]: ids of agents.
 
-        TODO: test me
-
         """
         cursor = await self.conn.execute(
             """
@@ -713,8 +709,6 @@ class Database:
         Returns:
             list[int]: ids of agents.
 
-        TODO: test me
-
         """
         cursor = await self.conn.execute(
             """
@@ -734,7 +728,7 @@ class Database:
         game_id: int,
         status: AgentStatus,
     ) -> AgentCount:
-        """Get cityzen and mafia count.
+        """Get citizen and mafia count.
 
         Args:
             game_id (int): game identifier.
@@ -743,14 +737,16 @@ class Database:
         Returns:
             AgentCount.
 
-        TODO: test me
-
         """
         cursor = await self.conn.execute(
             """
             SELECT
-                SUM(CASE WHEN role = 'MAFIA' THEN 1 ELSE 0 END) AS mafia,
-                SUM(CASE WHEN role = 'CITYZEN' THEN 1 ELSE 0 END) AS cityzen
+                COALESCE(
+                    SUM(CASE WHEN role = 'MAFIA' THEN 1 ELSE 0 END), 0
+                ) AS mafia,
+                COALESCE(
+                    SUM(CASE WHEN role = 'CITIZEN' THEN 1 ELSE 0 END), 0
+                ) AS citizen
             FROM agent_states
             WHERE game_id = ? AND status = ?
             """,
@@ -759,7 +755,7 @@ class Database:
 
         row = await cursor.fetchone()
 
-        if row is None:
-            return AgentCount(mafia=0, cityzen=0)
-
-        return AgentCount(mafia=row['mafia'], cityzen=row['cityzen'])
+        return AgentCount(
+            mafia=row['mafia'],  # type: ignore[index]
+            citizen=row['citizen'],  # type: ignore[index]
+        )
