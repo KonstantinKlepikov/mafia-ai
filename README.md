@@ -129,7 +129,7 @@ mafia-ai/
 │   ├── shared/
 │   │    ├── models.py          # Pydantic models
 │   │    └── database.py        # SQLite async wrapper
-│   ├── config.py      # MafiaServiceSettings
+│   ├── config.py      # MafiaSettings
 │   └── main.py        # Application entrypoint
 ├── tests/
 │   └── unit/                  # Unit tests (71 tests)

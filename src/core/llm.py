@@ -1,5 +1,3 @@
-# FIXME: remove me
-
 import asyncio
 import json
 import subprocess
@@ -7,17 +5,24 @@ from typing import Any
 
 from loguru import logger
 
-from config import MafiaServiceSettings
-from schemas.llm_schemas import GenerateRequest, GenerateResponse, Usage
+from config import MafiaSettings
+from schemas import GenerateRequest, GenerateResponse, Usage
 
 from .resource_detection import calculate_pool_size, detect_hardware
 
 
-class OllamaRunner:
-    """Executes Ollama model inference via subprocess."""
+class LLM:
+    """Local Ollama inference via subprocess."""
 
-    def __init__(self, settings: MafiaServiceSettings) -> None:
+    def __init__(self, settings: MafiaSettings) -> None:
+        """Initialize LLM.
+
+        Args:
+            settings (MafiaSettings): Unified service settings.
+
+        """
         self.settings = settings
+
         pool_size = settings.llm_pool_size
         if settings.llm_pool_size == 0:
             hardware = detect_hardware()
@@ -30,7 +35,7 @@ class OllamaRunner:
         self._semaphore = asyncio.Semaphore(self._pool_size)
 
         logger.info(
-            f'OllamaRunner initialized: {self._pool_size} concurrent '
+            f'LLM initialized: {self._pool_size} concurrent '
             f'processes for {settings.ollama_model}, timeout={settings.ollama_timeout}s'
         )
 
@@ -47,6 +52,8 @@ class OllamaRunner:
             subprocess.TimeoutExpired: If subprocess exceeds timeout.
             RuntimeError: If subprocess returns non-zero exit code.
 
+        TODO: test semaphore
+
         """
         async with self._semaphore:
             return await self._call_ollama_subprocess(request)
@@ -60,10 +67,12 @@ class OllamaRunner:
         Uses `ollama run <model> --format json` with prompt via stdin.
 
         Args:
-            request: Generation request.
+            request (GenerateRequest): Generation request.
 
         Returns:
-            Generated response with text and token usage.
+            GenerateRespons: generated response with text and token usage.
+
+        TODO: test me
 
         """
         # Build full prompt: system + messages
@@ -100,6 +109,8 @@ class OllamaRunner:
         Raises:
             subprocess.TimeoutExpired: If subprocess exceeds timeout.
             RuntimeError: If subprocess returns non-zero exit code or parsing fails.
+
+        TODO: test me
 
         """
         cmd = [

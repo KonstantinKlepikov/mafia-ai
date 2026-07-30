@@ -18,3 +18,7 @@ class EmptySharingException(RootException):
 
 class VotingError(RootException):
     """Voting error"""
+
+
+class ResourceException(RootException):
+    """Hardware problems"""

@@ -1,12 +1,15 @@
 import flet as ft
 from loguru import logger
 
+from core.logging import setup_logging
 from di_containers import Container
 from ui.main_app import MafiaAdminApp
 
 
 def main() -> None:
     """Start the Flet UI application with unified service."""
+    setup_logging(level='INFO')
+
     container = Container()
     app = MafiaAdminApp()
 

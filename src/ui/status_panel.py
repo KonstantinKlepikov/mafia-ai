@@ -24,7 +24,7 @@ class StatusPanel:
             border=ft.Border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
-        self._agent_cache: dict[str, Agent] = {}
+        self._agent_cache: dict[int, Agent] = {}
 
     def build(self) -> ft.Control:
         """Return Flet control for this component."""
@@ -69,7 +69,7 @@ class StatusPanel:
     def update_state(
         self,
         game_state: GameState | None,
-        agents: dict[str, Agent],
+        agents: dict[int, Agent],
     ) -> None:
         """Update status panel with new game state."""
         if game_state is None:
@@ -81,22 +81,22 @@ class StatusPanel:
             self._phase_text.value = game_state.phase.replace('_', ' ')
             self._round_text.value = str(game_state.round)
             self._alive_text.value = (
-                f'Alive: {len(game_state.alive_agents)} | '
+                f'Alive: {len(game_state.alive)} | '
                 f'Eliminated: {len(game_state.eliminated)}'
             )
 
             self._agent_cache.update(agents)
-            all_ids = game_state.alive_agents + game_state.eliminated
+            all_ids = game_state.alive + game_state.eliminated
             rows = []
             for agent_id in all_ids:
                 if agent_id in self._agent_cache:
                     agent = self._agent_cache[agent_id]
-                    status_icon = '✅' if agent_id in game_state.alive_agents else '💀'
+                    status_icon = '✅' if agent_id in game_state.alive else '💀'
                     rows.append(
                         ft.DataRow(
                             cells=[
-                                ft.DataCell(ft.Text(agent.persona_name)),
-                                ft.DataCell(ft.Text(agent.role.value)),
+                                ft.DataCell(ft.Text(agent.persona.name)),
+                                ft.DataCell(ft.Text(agent.state.role.value)),
                                 ft.DataCell(ft.Text(status_icon)),
                             ]
                         )
@@ -108,6 +108,6 @@ class StatusPanel:
         self._alive_text.update()
         self._agents_table.update()
 
-    def get_agent_cache(self) -> dict[str, Agent]:
+    def get_agent_cache(self) -> dict[int, Agent]:
         """Return cached agent information."""
         return self._agent_cache

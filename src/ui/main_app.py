@@ -4,7 +4,7 @@ import flet as ft
 from dependency_injector.wiring import Provide, inject
 from loguru import logger
 
-from config import AdminFletSettings, MafiaServiceSettings
+from config import AdminFletSettings, MafiaSettings
 from core.game import Game
 from di_containers import Container
 from schemas import AgentAnswer, Message, VoteEvent
@@ -14,7 +14,6 @@ from .game_controls import GameControls
 from .host_decision_panel import HostDecisionPanel
 from .message_feed import MessageFeed
 from .status_panel import StatusPanel
-from .subscriber import EventKind, Subscriber
 
 
 class MafiaAdminApp:
@@ -39,14 +38,12 @@ class MafiaAdminApp:
     @inject
     def __init__(
         self,
-        settings: MafiaServiceSettings = Provide[Container.settings],
+        settings: MafiaSettings = Provide[Container.settings],
         ui_settings: AdminFletSettings = Provide[Container.ui_settings],
-        subscriber: Subscriber = Provide[Container.subscriber],
         game: Game = Provide[Container.game],
     ) -> None:
         self.settings = settings
         self.ui_settings = ui_settings
-        self.subscriber = subscriber
         self.game: Game = game
 
     async def start(self, page: ft.Page) -> None:
@@ -137,42 +134,39 @@ class MafiaAdminApp:
         while True:
             try:
                 await asyncio.sleep(self.ui_settings.poll_interval_seconds)
-                await self._update_ui()
+                if self.game.game_active:
+                    await self._update_ui()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.error(f'Error in update loop: {exc}')
+                logger.error(f'Error in update loop: {exc.__str__()}')
 
     async def _update_ui(self) -> None:
         """Update UI with latest data from game service and event bus."""
-        if not self.subscriber:
-            return
 
-        game_state = self.game.get_game_state()
-        agents = await self.game.get_agents_info()
+        game_state = await self.game.db.get_game_state(game_id=self.game.shared.game_id)
+        agents = await self.game.get_alive_agents()
 
-        self._status_panel.update_state(game_state, agents)
+        self._status_panel.update_state(game_state=game_state, agents=agents)
 
         if self._ask_agent_panel:
-            self._ask_agent_panel.update_agents(agents)
+            self._ask_agent_panel.update_agents(agents=agents)
 
         if self._host_decision_panel:
-            self._host_decision_panel.update_visibility(game_state, agents)
+            self._host_decision_panel.update_visibility(
+                game_state=game_state,
+                agents=agents,
+            )
 
-        events = self.subscriber.get_events()
-        for event in events:
-            try:
-                if event.kind == EventKind.MESSAGE:
-                    msg = Message.model_validate_json(event.raw)
-                    self._message_feed.add_message(msg)
-                elif event.kind == EventKind.VOTE:
-                    vote = VoteEvent.model_validate_json(event.raw)
-                    self._message_feed.add_vote(vote)
-                elif event.kind == EventKind.ANSWER:
-                    answer = AgentAnswer.model_validate_json(event.raw)
-                    self._message_feed.add_answer(answer)
-            except Exception as exc:
-                logger.warning(f'Failed to parse event: {exc}')
+        feed = self.game.event_bus.get()
+        if feed is None:
+            return
+        elif isinstance(feed, Message):
+            self._message_feed.add_message(feed)
+        elif isinstance(feed, VoteEvent):
+            self._message_feed.add_vote(feed)
+        elif isinstance(feed, AgentAnswer):
+            self._message_feed.add_answer(feed)
 
     async def _on_game_started(self) -> None:
         """Handle game started event."""

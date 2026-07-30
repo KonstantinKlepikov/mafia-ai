@@ -3,30 +3,23 @@ from contextlib import asynccontextmanager
 from dependency_injector import containers, providers
 from loguru import logger
 
-from config import AdminFletSettings, MafiaServiceSettings
+from config import AdminFletSettings, MafiaSettings
 from core.event_bus import EventBus
 from core.game import Game
+from core.llm import LLM
 from data import Database
-from llm.llm import LLM
-from ui.subscriber import Subscriber
 
 
 @asynccontextmanager
-async def init_game(
-    db: Database,
-    settings: MafiaServiceSettings,
-    subscriber: Subscriber,
-):
+async def init_game(db: Database, settings: MafiaSettings):
     try:
         await db.connect()
         await db.init_from_yaml(yaml_path=settings.db_yaml_path)
-        await subscriber.start()
         logger.info('Game engine started')
     except Exception as exc:
         logger.error(f'Game engine failed to start: {exc.__str__()}')
         raise
     yield
-    await subscriber.stop()
     await db.close()
     logger.info('Game engine stopped')
 
@@ -41,20 +34,14 @@ class Container(containers.DeclarativeContainer):
     )
 
     # game settings
-    settings = providers.Singleton(MafiaServiceSettings)
+    settings = providers.Singleton(MafiaSettings)
     ui_settings = providers.Singleton(AdminFletSettings)
 
     # services
     llm = providers.Singleton(LLM, settings=settings)
     event_bus = providers.Singleton(EventBus)
-    subscriber = providers.Singleton(Subscriber, event_bus=event_bus)
     db = providers.Singleton(Database)
-    init_game_engine = providers.Resource(
-        init_game,
-        db=db,
-        settings=settings,
-        subscriber=subscriber,
-    )
+    init_game_engine = providers.Resource(init_game, db=db, settings=settings)
     game = providers.Singleton(
         Game,
         settings=settings,

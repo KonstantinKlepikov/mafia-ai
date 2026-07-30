@@ -88,7 +88,7 @@ class HostDecisionPanel:
     def update_visibility(
         self,
         game_state: GameState | None,
-        agents: dict[str, Agent],
+        agents: dict[int, Agent],
     ) -> None:
         """Update panel visibility based on game phase."""
         should_show = game_state is not None and game_state.phase == 'HOST_DECISION'
@@ -96,14 +96,14 @@ class HostDecisionPanel:
         if should_show:
             self._override_dropdown.options = [
                 ft.DropdownOption(
-                    key=agent_id,
-                    text=f'{agent_id} · {agent.persona_name}',
+                    key=str(agent_id),
+                    text=f'{agent_id} · {agent.persona.name}',
                 )
                 for agent_id, agent in agents.items()
             ]
             if self._override_dropdown.value not in agents:
                 self._override_dropdown.value = (
-                    list(agents.keys())[0] if agents else None
+                    str(list(agents.keys())[0]) if agents else None
                 )
             self._override_dropdown.update()
 

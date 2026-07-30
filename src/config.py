@@ -3,7 +3,7 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class MafiaServiceSettings(BaseSettings):
+class MafiaSettings(BaseSettings):
     """Unified Mafia service settings - combines LLM and Game settings.
 
     Attrs:
@@ -49,7 +49,7 @@ class MafiaServiceSettings(BaseSettings):
 class AdminFletSettings(BaseSettings):
     """Settings for the Flet admin panel."""
 
-    poll_interval_seconds: float = 2.0
+    poll_interval_seconds: float = 0.1
     window_width: int = 1400
     window_height: int = 900
 

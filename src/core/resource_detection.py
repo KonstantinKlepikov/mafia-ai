@@ -1,32 +1,13 @@
 import os
 import platform
 import subprocess
-from dataclasses import dataclass
 
 from loguru import logger
 
-
-@dataclass
-class HardwareInfo:
-    """Hardware resource information.
-
-    Attrs:
-        has_cuda: True if NVIDIA GPU with CUDA is available.
-        gpu_count: Number of available GPUs (0 if no GPU).
-        total_vram_mb: Total VRAM across all GPUs in MB (0 if no GPU).
-        cpu_cores: Number of CPU cores.
-        total_ram_mb: Total system RAM in MB.
-
-    """
-
-    has_cuda: bool
-    gpu_count: int
-    total_vram_mb: int
-    cpu_cores: int
-    total_ram_mb: int
+from schemas import HardwareInfo, NvidiaGPUInfo, ResourceException
 
 
-def _detect_nvidia_gpu() -> tuple[bool, int, int]:
+def _detect_nvidia_gpu() -> NvidiaGPUInfo:
     """Detect NVIDIA GPU via nvidia-smi.
 
     Returns:
@@ -65,9 +46,13 @@ def _detect_nvidia_gpu() -> tuple[bool, int, int]:
     except subprocess.TimeoutExpired:
         logger.warning('nvidia-smi timed out, assuming no CUDA GPU')
     except Exception as exc:
-        logger.warning(f'Failed to detect GPU via nvidia-smi: {exc}')
+        logger.warning(f'Failed to detect GPU via nvidia-smi: {exc.__str__()}')
 
-    return has_cuda, gpu_count, total_vram_mb
+    return NvidiaGPUInfo(
+        has_cuda=has_cuda,
+        gpu_count=gpu_count,
+        total_vram_mb=total_vram_mb,
+    )
 
 
 def _detect_system_ram() -> int:
@@ -89,12 +74,16 @@ def _detect_system_ram() -> int:
                         total_ram_mb = total_ram_kb // 1024
                         break
         except Exception as exc:
-            logger.warning(f'Failed to read /proc/meminfo: {exc}')
+            logger.warning(f'Failed to read /proc/meminfo: {exc.__str__()}')
 
     if total_ram_mb == 0:
         # Fallback: assume 8GB as safe default
         total_ram_mb = 8192
         logger.warning(f'Could not detect RAM, using default: {total_ram_mb} MB')
+    elif total_ram_mb < 8192:
+        raise ResourceException(
+            f'Not enough RAM available: {total_ram_mb} MB < 8192 MB'
+        )
     else:
         logger.info(f'Detected {total_ram_mb} MB total RAM')
 
@@ -108,15 +97,15 @@ def detect_hardware() -> HardwareInfo:
         HardwareInfo with detected resources.
 
     """
-    has_cuda, gpu_count, total_vram_mb = _detect_nvidia_gpu()
+    nvidia = _detect_nvidia_gpu()
     cpu_cores = os.cpu_count() or 1
     logger.info(f'Detected {cpu_cores} CPU cores')
     total_ram_mb = _detect_system_ram()
 
     return HardwareInfo(
-        has_cuda=has_cuda,
-        gpu_count=gpu_count,
-        total_vram_mb=total_vram_mb,
+        has_cuda=nvidia.has_cuda,
+        gpu_count=nvidia.gpu_count,
+        total_vram_mb=nvidia.total_vram_mb,
         cpu_cores=cpu_cores,
         total_ram_mb=total_ram_mb,
     )
@@ -125,9 +114,14 @@ def detect_hardware() -> HardwareInfo:
 def calculate_pool_size(hardware: HardwareInfo, model_name: str) -> int:
     """Calculate optimal number of model instances for pool.
 
+    NOTE: preference to CUDA. If no cxuda -> use CPU. If oversize model -> raise!
+
     Args:
         hardware: Detected hardware info.
         model_name: Name of the Ollama model (e.g. 'llama3.1:8b').
+
+    Raises:
+        ResourceException: model to large
 
     Returns:
         Number of model instances to run in parallel (min 1, max 8).
@@ -148,13 +142,11 @@ def calculate_pool_size(hardware: HardwareInfo, model_name: str) -> int:
         vram_per_model = 4 * 1024
         ram_per_model = 2 * 1024
 
-    pool_size = 1
-
     if hardware.has_cuda and hardware.total_vram_mb > 0:
         # GPU available: use VRAM capacity
         # Keep 20% reserved for system
         usable_vram = int(hardware.total_vram_mb * 0.8)
-        pool_size = max(1, usable_vram // vram_per_model)
+        pool_size = max(0, usable_vram // vram_per_model)
         logger.info(
             f'GPU mode: usable VRAM {usable_vram} MB, estimated {pool_size} instances'
         )
@@ -162,7 +154,7 @@ def calculate_pool_size(hardware: HardwareInfo, model_name: str) -> int:
         # CPU mode: use RAM capacity
         # Keep 40% reserved for system and other processes
         usable_ram = int(hardware.total_ram_mb * 0.6)
-        pool_size = max(1, usable_ram // ram_per_model)
+        pool_size = max(0, usable_ram // ram_per_model)
         logger.info(
             f'CPU mode: usable RAM {usable_ram} MB, estimated {pool_size} instances'
         )
@@ -175,4 +167,8 @@ def calculate_pool_size(hardware: HardwareInfo, model_name: str) -> int:
         pool_size = min(pool_size, hardware.cpu_cores)
 
     logger.info(f'Final pool size for model {model_name}: {pool_size}')
+
+    if pool_size == 0:
+        raise ResourceException('Model to large')
+
     return pool_size

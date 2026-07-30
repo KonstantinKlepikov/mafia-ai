@@ -49,7 +49,7 @@ class AskAgentPanel:
             expand=True,
         )
 
-    def update_agents(self, agents: dict[str, Agent]) -> None:
+    def update_agents(self, agents: dict[int, Agent]) -> None:
         """Update available agents dropdown."""
         if not agents:
             self._agent_dropdown.options = []
@@ -57,13 +57,15 @@ class AskAgentPanel:
         else:
             self._agent_dropdown.options = [
                 ft.DropdownOption(
-                    key=agent_id,
-                    text=f'{agent_id} · {agent.persona_name}',
+                    key=str(agent_id),
+                    text=f'{agent_id} · {agent.persona.name}',
                 )
                 for agent_id, agent in agents.items()
             ]
             if self._agent_dropdown.value not in agents:
-                self._agent_dropdown.value = list(agents.keys())[0] if agents else None
+                self._agent_dropdown.value = (
+                    str(list(agents.keys())[0]) if agents else None
+                )
 
         self._agent_dropdown.update()
 
@@ -88,7 +90,7 @@ class AskAgentPanel:
             return
 
         try:
-            await game.ask_agent(agent_id, question.strip())
+            await game.ask_agent(int(agent_id), question.strip())
             self._question_field.value = ''
             self._question_field.update()
 

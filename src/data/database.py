@@ -587,10 +587,14 @@ class Database:
         else:
             try:
                 parsed = json.loads(msgs_json)
+                if not isinstance(parsed, list):
+                    parsed = []
             except Exception:
                 parsed = []
 
-            messages = [Message.model_validate(m) for m in parsed]
+            logger.debug(f'parsed messages: {parsed}')
+
+            messages = [Message.model_validate(m) for m in parsed if m is not None]
 
         return AgentStateOut(
             agent_id=row['id'],

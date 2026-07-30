@@ -94,7 +94,7 @@ class AgentStateOut(AgentStateIn):
 
 
 class Agent(BaseModel):
-    """Agent information returned by the agent's HTTP API and used by the orchestrator.
+    """Agent information.
 
     - `state`: agent state
     - `persona`: persona data

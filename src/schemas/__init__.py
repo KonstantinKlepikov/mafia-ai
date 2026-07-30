@@ -6,7 +6,7 @@ from .enums import (
     SystemPromptKey,
     TargetAudience,
 )
-from .exceptions import EmptySharingException, VotingError
+from .exceptions import EmptySharingException, ResourceException, VotingError
 from .game_schemas import (
     Agent,
     AgentAnswer,
@@ -27,6 +27,7 @@ from .llm_schemas import (
     ResetResponse,
     Usage,
 )
+from .resource_schemas import HardwareInfo, NvidiaGPUInfo
 
 __all__ = [
     'Agent',
@@ -54,4 +55,7 @@ __all__ = [
     'Usage',
     'GenerateResponse',
     'ResetResponse',
+    'HardwareInfo',
+    'NvidiaGPUInfo',
+    'ResourceException',
 ]

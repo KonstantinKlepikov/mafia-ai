@@ -1,8 +1,8 @@
 from loguru import logger
 
-from config import MafiaServiceSettings
+from config import MafiaSettings
+from core.llm import LLM
 from data import Database
-from llm.llm import LLM
 from schemas import (
     AgentRole,
     GamePhase,
@@ -37,7 +37,7 @@ class AgentLogic:
         persona: Persona,
         llm: LLM,
         db: Database,
-        settings: MafiaServiceSettings,
+        settings: MafiaSettings,
     ) -> None:
         self.agent_id = agent_id
         self.persona = persona
