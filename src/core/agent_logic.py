@@ -6,9 +6,9 @@ from data import Database
 from schemas import (
     AgentRole,
     GamePhase,
-    GenerateRequest,
     Message,
     MessageItem,
+    MessageRequest,
     MessageRole,
     Persona,
     SystemPromptKey,
@@ -59,37 +59,33 @@ class AgentLogic:
 
         """
         state = await self.db.get_agent_state(self.agent_id)
-        is_night = phase == GamePhase.NIGHT
-
-        # Citizens don't speak during night
-        if is_night and state.role != AgentRole.MAFIA:
+        if state.role != AgentRole.MAFIA:
             return ''
 
-        if is_night:
-            extra_prompt = await self.db.get_system_prompt(
-                key=SystemPromptKey.night_speak,
-            )
-        else:
-            extra_prompt = await self.db.get_system_prompt(
-                key=SystemPromptKey.day_speak,
-            )
+        hidden = True if phase == GamePhase.NIGHT else False
+
+        extra_prompt = (
+            await self.db.get_system_prompt(key=SystemPromptKey.night_speak)
+            if hidden
+            else await self.db.get_system_prompt(key=SystemPromptKey.day_speak)
+        )
+        logger.debug(f'Extra prompt text: {extra_prompt}')
 
         text = await self._generate_llm_response(
             extra_user_msg=extra_prompt,
             max_tokens=self.settings.message_max_tokens,
         )
 
-        # Store message in history
-        target_audience = TargetAudience.MAFIA_ONLY if is_night else TargetAudience.ALL
         message = Message(
             sender_id=self.agent_id,
             content=text,
             phase=phase,
             round=game_round,
-            target_audience=target_audience,
+            target_audience=TargetAudience.MAFIA_ONLY if hidden else TargetAudience.ALL,
         )
         await self.db.insert_message(message=message)
-        logger.info(f'Agent {self.agent_id} generated message for phase {phase}: ')
+        logger.info(f'Agent {self.agent_id} generated message for: {phase}')
+        logger.debug(f'Message text: {text}')
         return text
 
     async def generate_vote(self, candidates: list[int], is_night: bool) -> int:
@@ -163,18 +159,6 @@ class AgentLogic:
         logger.info(f'Agent {self.agent_id} answered question: {text[:10]}...')
         return text
 
-    async def add_message_to_history(self, message: Message) -> None:
-        """Add external message to agent's history.
-
-        Args:
-            message: Message from another agent or system.
-
-        TODO: test me
-        FIXME: get summarisation and make summarisation with current message
-
-        """
-        self.db.insert_message(message=message)
-
     async def _generate_llm_response(self, extra_user_msg: str, max_tokens: int) -> str:
         """Build context from history and call the LLM service.
 
@@ -183,11 +167,9 @@ class AgentLogic:
             max_tokens: Upper bound on generated tokens.
 
         Returns:
-            Generated text from the LLM.
+            str: generated text from the LLM.
 
-        Raises:
-            RuntimeError: On LLM generation failure.
-            ValueError: agent not found
+        TODO: test me
 
         """
         state = await self.db.get_agent_state(agent_id=self.agent_id)
@@ -208,11 +190,10 @@ class AgentLogic:
 
         messages.append(MessageItem(role=MessageRole.USER, content=extra_user_msg))
 
-        request = GenerateRequest(
+        request = MessageRequest(
             system_prompt=self.persona.prompt,
             messages=messages,
             max_tokens=max_tokens,
         )
 
-        response = await self.llm.generate(request=request)
-        return response.text
+        return await self.llm.message(request=request)

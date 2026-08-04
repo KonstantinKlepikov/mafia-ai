@@ -26,19 +26,19 @@ class MessageItem(BaseModel):
     content: str = Field(..., description='Message content')
 
 
-class GenerateRequest(BaseModel):
-    """Request body for POST /mcp/generate.
+class MessageRequest(BaseModel):
+    """Request body.
 
     Attrs:
 
         system_prompt (str): instruction context placed before the conversation
-        messages (list[MessageItem]): ordered conversation history
-                                      (user/assistant turns)
+        summarisation (str): summarized conversation history
         max_tokens (int): upper bound on generated tokens. Default to 512.
 
     """
 
     system_prompt: str = Field(..., description='System prompt for the model')
+    conversation: str = Field(..., description='Summarized conversation history')
     messages: list[MessageItem] = Field(
         default_factory=list,
         description='Conversation history (user/assistant turns)',
@@ -49,23 +49,25 @@ class GenerateRequest(BaseModel):
         description='Maximum tokens to generate',
     )
 
-
-class Usage(BaseModel):
-    """Token usage statistics returned by the model."""
-
-    prompt_tokens: int = Field(..., description='Tokens in the prompt')
-    completion_tokens: int = Field(..., description='Tokens in the completion')
-    total_tokens: int = Field(..., description='Total tokens used')
-
-
-class GenerateResponse(BaseModel):
-    """Response body for POST /mcp/generate."""
-
-    text: str = Field(..., description='Generated text')
-    usage: Usage = Field(..., description='Token usage statistics')
-
-
-class ResetResponse(BaseModel):
-    """Response body for POST /mcp/reset."""
-
-    status: str = Field(default='ok', description='Reset status')
+    def request(self) -> list[dict[str, str]]:
+        msg = [
+            {
+                'role': MessageRole.SYSTEM.value,
+                'content': self.system_prompt,
+            },
+        ]
+        if self.conversation:
+            msg.append(
+                {
+                    'role': MessageRole.SYSTEM.value,
+                    'content': self.conversation,
+                }
+            )
+        for m in self.messages:
+            msg.append(
+                {
+                    'role': m.role.value,
+                    'content': m.content,
+                }
+            )
+        return msg

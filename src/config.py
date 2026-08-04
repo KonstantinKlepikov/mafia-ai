@@ -7,7 +7,6 @@ class MafiaSettings(BaseSettings):
     """Unified Mafia service settings - combines LLM and Game settings.
 
     Attrs:
-        ollama_binary_path: Path to ollama binary (default: 'ollama' from PATH).
         ollama_model: Name of the model to use for generation.
         ollama_timeout: Timeout in seconds for each ollama subprocess call.
         llm_pool_size: Number of parallel model instances (0 = auto-detect).
@@ -18,13 +17,13 @@ class MafiaSettings(BaseSettings):
         db_yaml_path: Path to prompts.yaml config file.
         message_max_tokens: Max tokens for agent message generation.
         vote_max_tokens: Max tokens for vote generation.
+        log_level: Loguru log level for application logging.
         ui_enabled: Whether to enable Flet UI.
         ui_port: Port for Flet UI web server.
 
     """
 
     # LLM settings (formerly from LLMSettings)
-    ollama_binary_path: str = 'ollama'
     ollama_model: str = 'llama3.1:8b'
     ollama_timeout: int = 120
     llm_pool_size: int = 0
@@ -38,6 +37,7 @@ class MafiaSettings(BaseSettings):
     db_yaml_path: Path = Path('./config/prompts.yaml')
     message_max_tokens: int = 150
     vote_max_tokens: int = 50
+    log_level: str = 'INFO'
 
     # UI settings
     ui_enabled: bool = True

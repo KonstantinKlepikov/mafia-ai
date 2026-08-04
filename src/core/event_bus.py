@@ -32,18 +32,17 @@ class EventBus:
             feed: Event data (typically dict or Pydantic model).
 
         """
-        logger.debug(f'Publishing in queue {feed.__class__.__name__}')
+        logger.debug(f'Publishing in queue: {feed.__class__.__name__}')
         try:
             self._queue.put_nowait(feed)
         except (asyncio.QueueFull, asyncio.QueueShutDown):
-            logger.warning(f'Queue dropping event for {feed.__class__.__name__}')
+            logger.warning(f'Queue dropping event for: {feed.__class__.__name__}')
 
     def get(self) -> Message | AgentAnswer | VoteEvent | None:
         try:
             feed = self._queue.get_nowait()
             self._queue.task_done()
-            logger.debug(f'Geting from queue {feed.__class__.__name__}')
+            logger.debug(f'Geting from queue: {feed.__class__.__name__}')
             return feed
         except (asyncio.QueueEmpty, asyncio.QueueShutDown):
-            logger.warning('Queue is empty or shuttdown')
             return None

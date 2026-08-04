@@ -336,10 +336,12 @@ class TestDatabaseMessage:
         assert retrieved.target_audience == TargetAudience.ALL, 'wrong target'
 
     async def test_get_agents_state_aggregates_messages(
-        self, db: Database, game_id: int
+        self,
+        db: Database,
+        game_id: int,
     ) -> None:
         """
-        Test that get_agents_state returns agents with aggregated message histories.
+        Test get_agents_state returns agents with aggregated message histories.
         """
         state1 = AgentStateIn(role=AgentRole.CITIZEN, persona_id=1)
         state2 = AgentStateIn(role=AgentRole.MAFIA, persona_id=2)
@@ -371,3 +373,28 @@ class TestDatabaseMessage:
         assert a1.message_history[0].content == 'a1-m1'
         assert a1.message_history[1].content == 'a1-m2'
         assert a2.message_history[0].content == 'a2-m1'
+
+    async def test_get_agents_state_no_messages(
+        self,
+        db: Database,
+        game_id: int,
+    ) -> None:
+        """
+        Test get_agents_state with no messages.
+        """
+        state1 = AgentStateIn(role=AgentRole.CITIZEN, persona_id=1)
+        state2 = AgentStateIn(role=AgentRole.MAFIA, persona_id=2)
+        agent1 = await db.init_agent(state=state1, game_id=game_id)
+        agent2 = await db.init_agent(state=state2, game_id=game_id)
+        await db.insert_message(
+            Message(sender_id=agent1, content='a1-m2', phase=GamePhase.DAY, round=1)
+        )
+
+        agents = await db.get_agents_state(game_id=game_id, status=AgentStatus.ALIVE)
+
+        # find agent entries and validate message counts and contents
+        a1 = next(a for a in agents if a.agent_id == agent1)
+        a2 = next(a for a in agents if a.agent_id == agent2)
+
+        assert len(a1.message_history) == 1, 'agent1 should have 1 message'
+        assert len(a2.message_history) == 0, 'agent2 should have 0 messages'

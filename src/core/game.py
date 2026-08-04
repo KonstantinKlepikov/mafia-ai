@@ -40,9 +40,6 @@ class Shared:
     mafia_agents_ids: list[int]
     cityzen_agents_ids: list[int]
 
-    # Message history and SSE subscribers
-    messages: list[Message]
-
     # Vote collection
     vote_queue: asyncio.Queue[VoteEvent]
 
@@ -50,6 +47,7 @@ class Shared:
     host_decision: HostDecision
     host_decision_event: asyncio.Event
 
+    # Agents
     agents: dict[int, AgentLogic] = field(default_factory=dict)
 
 
@@ -83,6 +81,7 @@ class Game:
         self.llm = llm
         self.event_bus = event_bus
         self._shared: Shared | None = None
+        self._game_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self.game_active: bool = False
 
     @property
@@ -132,22 +131,6 @@ class Game:
         )
         logger.info(f'Agent {agent_id} eliminated and removed from AgentLogic')
 
-    async def generate_message(
-        self,
-        agent_id: int,
-        phase: GamePhase,
-        game_round: int,
-    ) -> str:
-        """Generate a message for the current phase."""
-        return await self.shared.agents[agent_id].generate_message(
-            phase=phase,
-            game_round=game_round,
-        )
-
-    async def answer_question(self, agent_id: int, question_text: str) -> str:
-        """Generate answer to host question."""
-        return await self.shared.agents[agent_id].answer_question(question_text)
-
     async def begin_game(self) -> None:
         """Initialise roles/personas and launch the game loop.
 
@@ -159,7 +142,7 @@ class Game:
         """
         try:
             if self.game_active:
-                raise RuntimeError('A game is already in progress. ')
+                logger.info('A game is already in progress. ')
             else:
                 del self.shared
         except EmptySharingException:
@@ -168,6 +151,7 @@ class Game:
         self.event_bus.clean()
         all_personas = {p.persona_id: p for p in await self.db.get_personas()}
         game_id = await self.db.init_game()
+        logger.debug(f'{game_id=}')
 
         # roles
         system, mafia, cityzen = self.split_personas(all_personas=all_personas)
@@ -219,18 +203,21 @@ class Game:
             system_agent_id=system_agent.agent_id,
             mafia_agents_ids=mafia_agents_ids,
             cityzen_agents_ids=cityzen_agents_ids,
-            messages=[],
             vote_queue=asyncio.Queue(),
             host_decision=HostDecision(),
             host_decision_event=asyncio.Event(),
             agents=agents,
         )
+        logger.debug(f'{self.shared=}')
+        self._game_task = asyncio.create_task(self._run_game_loop())
         self.game_active = True
         logger.info('Game begin.')
 
     async def end_game(self) -> None:
         self.event_bus.clean()
         del self.shared
+        if self._game_task is not None and not self._game_task.done():
+            self._game_task.cancel()
         logger.info('Game end.')
 
     def submit_host_decision(self, decision: HostDecision) -> None:
@@ -302,23 +289,20 @@ class Game:
         """
         try:
             answer_text = await asyncio.wait_for(
-                self.answer_question(agent_id, question_text),
+                self.shared.agents[agent_id].answer_question(question_text),
                 timeout=timeout,
             )
 
-            # Create AgentAnswer event for UI
             answer = AgentAnswer(
                 question_id=str(uuid.uuid4()),
                 agent_id=agent_id,
                 answer_text=answer_text,
             )
 
-            # Publish to EventBus for UI
-            # await self.event_bus.publish_async(EventType.ANSWER, answer)
             self.event_bus.publish(feed=answer)
 
             return answer_text
-        except (asyncio.TimeoutError, Exception) as exc:
+        except Exception as exc:
             logger.warning(f'Failed to get answer from {agent_id}: {exc.__str__()}')
             raise
 
@@ -360,18 +344,18 @@ class Game:
                     game_id=self.shared.game_id,
                     status=AgentStatus.ALIVE,
                 )
-                # --- NIGHT ---
+                logger.info('--- NIGHT ---')
                 game_state = await self._transition_phase(phase=GamePhase.NIGHT)
                 await self._run_speak_phase(mafia_only=True, game_state=game_state)
 
-                # --- NIGHT_VOTE ---
+                logger.info('--- NIGHT_VOTE ---')
                 await self._transition_phase(phase=GamePhase.NIGHT_VOTE)
                 night_votes = await self._collect_votes(
                     expected=len(mafia),
                     suffix='night',
                 )
 
-                # --- RESOLVE_NIGHT ---
+                logger.info('--- RESOLVE_NIGHT ---')
                 game_state = await self._transition_phase(phase=GamePhase.RESOLVE_NIGHT)
                 eliminated_id = resolve_votes(votes=night_votes)
                 if eliminated_id:
@@ -379,11 +363,11 @@ class Game:
                 if self._check_and_handle_win():
                     break
 
-                # --- DAY ---
+                logger.info('--- DAY ---')
                 game_state = await self._transition_phase(phase=GamePhase.DAY)
                 await self._run_speak_phase(mafia_only=False, game_state=game_state)
 
-                # --- DAY_VOTE ---
+                logger.info('--- DAY_VOTE ---')
                 await self._transition_phase(phase=GamePhase.DAY_VOTE)
                 alive = await self.db.get_agents_ids(
                     game_id=self.shared.game_id,
@@ -391,7 +375,7 @@ class Game:
                 )
                 day_votes = await self._collect_votes(expected=len(alive), suffix='day')
 
-                # --- HOST_DECISION ---
+                logger.info('--- HOST_DECISION ---')
                 game_state = await self._transition_phase(phase=GamePhase.HOST_DECISION)
                 eliminated_id = await self._wait_for_host_decision(votes=day_votes)
                 if eliminated_id:
@@ -418,13 +402,10 @@ class Game:
         Returns:
             GameState
 
-        TODO: test me
-
         """
         await self.db.update_game_phase(game_id=self.shared.game_id, phase=phase)
         logger.info(f'Phase -> {phase}')
         game_state = await self.db.get_game_state(game_id=self.shared.game_id)
-        # await self.event_bus.publish_async(EventType.STATE_CHANGE, game_state)
         return game_state
 
     async def _eliminate_agent(self, agent_id: int) -> None:
@@ -443,8 +424,6 @@ class Game:
 
         await self.eliminate_agent(agent_id)
         logger.info(f'Agent {agent_id} eliminated')
-        # game_state = await self.db.get_game_state(game_id=self.shared.game_id)
-        # await self.event_bus.publish_async(EventType.STATE_CHANGE, game_state)
 
     async def _run_speak_phase(self, mafia_only: bool, game_state: GameState) -> None:
         """Request agents to generate messages during NIGHT or DAY speaking phase.
@@ -469,51 +448,33 @@ class Game:
         if not targets:
             return
 
-        per_agent_timeout = max(
-            self.settings.phase_duration_seconds / len(targets),
-            5.0,
-        )
+        tasks: list[asyncio.Task] = []
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for agent_id in targets:
+                    tasks.append(
+                        tg.create_task(
+                            self.shared.agents[agent_id].generate_message(
+                                phase=game_state.phase,
+                                game_round=game_state.round,
+                            )
+                        )
+                    )
+        except Exception as exc:
+            logger.error(f'Message generation failed: {exc.__str__()}')
 
-        # FIXME: not async for - use tasks and gather or tasksgroup
-        for agent_id in targets:
-            try:
-                message_text = await asyncio.wait_for(
-                    self.generate_message(
-                        agent_id,
-                        game_state.phase,
-                        game_state.round,
-                    ),
-                    timeout=per_agent_timeout,
-                )
-
-                # Store message in history
-                message = Message(
+        [
+            self.event_bus.publish(
+                feed=Message(
                     sender_id=agent_id,
                     agent_id=agent_id,
                     round=game_state.round,
                     phase=game_state.phase,
-                    content=message_text,
+                    content=task.result(),
                 )
-                self.shared.messages.append(message)
-
-                # Publish to EventBus for UI
-                # await self.event_bus.publish_async(EventType.MESSAGE, message)
-                self.event_bus.publish(feed=message)
-
-                logger.info(
-                    f'Agent {agent_id} spoke in {game_state.phase}'
-                    f'round {game_state.round}'
-                )
-
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f'Agent {agent_id} did not respond within '
-                    f'{per_agent_timeout:.1f}s; moving on'
-                )
-            except Exception as exc:
-                logger.error(
-                    f'Agent {agent_id} message generation failed: {exc.__str__()}'
-                )
+            )
+            for task in tasks
+        ]
 
     async def _collect_votes(self, expected: int, suffix: str) -> list[VoteEvent]:
         """Collect votes from the queue until expected count or timeout.

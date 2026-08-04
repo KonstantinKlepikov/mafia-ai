@@ -23,6 +23,7 @@ services:
       # UI settings
       - UI_ENABLED=${UI_ENABLED:-true}
       - UI_PORT=${UI_PORT:-8550}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ${PWD}/config:/app/config:ro
       - ollama_models:/root/.ollama

@@ -6,7 +6,6 @@ applyTo: 'tests/init/*.py'
 
 - Framework: **pytest** with `pytest-asyncio`
 - Use test classes for groups of tests, that wraps similar tests (e.g. tests for one function or one method of class)
-- Follow **AAA** pattern: Arrange-Act-Assert (can use comments for sections)
 - One case - one test. Never combine many test cases in one test
 - Naming: `test_<what>_<scenario>` (e.g. `test_create_flight_raises_on_duplicate_callsign`)
 - Start any doc strings of tests with word `Test` (e.g. `"""Test function_name success with raw data"""`)

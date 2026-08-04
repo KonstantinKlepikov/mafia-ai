@@ -20,12 +20,9 @@ from .game_schemas import (
     VoteEvent,
 )
 from .llm_schemas import (
-    GenerateRequest,
-    GenerateResponse,
     MessageItem,
     MessageRole,
-    ResetResponse,
-    Usage,
+    MessageRequest,
 )
 from .resource_schemas import HardwareInfo, NvidiaGPUInfo
 
@@ -51,11 +48,8 @@ __all__ = [
     'VotingError',
     'MessageRole',
     'MessageItem',
-    'GenerateRequest',
-    'Usage',
-    'GenerateResponse',
-    'ResetResponse',
     'HardwareInfo',
     'NvidiaGPUInfo',
     'ResourceException',
+    'MessageRequest',
 ]

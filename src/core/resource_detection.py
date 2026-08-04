@@ -6,6 +6,8 @@ from loguru import logger
 
 from schemas import HardwareInfo, NvidiaGPUInfo, ResourceException
 
+# NOTE: deprecated
+
 
 def _detect_nvidia_gpu() -> NvidiaGPUInfo:
     """Detect NVIDIA GPU via nvidia-smi.

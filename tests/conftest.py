@@ -1,8 +1,11 @@
 from typing import AsyncGenerator
+from unittest.mock import Mock
 
 import pytest
+from ollama import AsyncClient
 
 from config import AdminFletSettings, MafiaSettings
+from core.agent_logic import AgentLogic
 from core.llm import LLM
 from data.database import Database
 from di_containers import Container
@@ -46,9 +49,32 @@ async def db(settings: MafiaSettings) -> AsyncGenerator[Database, None]:
 
 
 @pytest.fixture(scope='function')
-async def llm(settings: MafiaSettings) -> AsyncGenerator[LLM, None]:
+async def ollama_cl() -> AsyncGenerator[AsyncClient, None]:
     """Llm"""
-    yield LLM(settings=settings)
+    yield AsyncClient()
+
+
+@pytest.fixture(scope='function')
+async def llm(
+    settings: MafiaSettings,
+    ollama_cl: AsyncClient,
+) -> AsyncGenerator[LLM, None]:
+    """Llm"""
+    yield LLM(settings=settings, ollama=ollama_cl)
+
+
+@pytest.fixture(scope='function')
+def agent_logic(db: Database, llm: LLM, settings: MafiaSettings) -> AgentLogic:
+    """Create an AgentLogic instance with mocked dependencies."""
+    persona = Mock()
+    persona.prompt = 'test persona prompt'
+    return AgentLogic(
+        agent_id=1,
+        persona=persona,
+        llm=llm,
+        db=db,
+        settings=settings,
+    )
 
 
 @pytest.fixture(scope='function')

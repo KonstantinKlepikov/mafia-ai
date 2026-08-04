@@ -657,7 +657,7 @@ class Database:
                 except Exception:
                     parsed = []
 
-                messages = [Message.model_validate(m) for m in parsed]
+                messages = [Message.model_validate(m) for m in parsed if m]
 
             agents.append(
                 AgentStateOut(

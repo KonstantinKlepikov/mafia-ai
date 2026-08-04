@@ -93,80 +93,24 @@ class TestGameAgentLifecycle:
             'agent status should be updated in the database'
         )
 
-    async def test_generate_message_delegates_to_agent_logic(
+    async def test_transition_phase_updates_db_and_returns_state(
         self,
-        db: Database,
         game_instance: Game,
     ) -> None:
-        """Test generate_message forwards the call to the registered agent logic."""
-        persona = await db.get_persona(1)
-        state = AgentStateIn(
-            role=AgentRole.CITIZEN,
-            status=AgentStatus.ALIVE,
-            persona_id=persona.persona_id,
+        """Test _transition_phase persists the new phase and returns the state."""
+        expected_state = MagicMock()
+        game_instance.db.update_game_phase = AsyncMock()  # type: ignore
+        game_instance.db.get_game_state = AsyncMock(  # type: ignore
+            return_value=expected_state
         )
 
-        agent = await game_instance.initialize_agent(
-            state=state,
-            persona=persona,
+        result = await game_instance._transition_phase(phase=GamePhase.DAY)
+
+        game_instance.db.update_game_phase.assert_awaited_once_with(
+            game_id=game_instance.shared.game_id,
+            phase=GamePhase.DAY,
+        )
+        game_instance.db.get_game_state.assert_awaited_once_with(
             game_id=game_instance.shared.game_id,
         )
-        expected_text = 'generated text'
-        mock_logic = Mock()
-        mock_logic.generate_message = AsyncMock(return_value=expected_text)
-        game_instance.shared.agents[agent.agent_id] = mock_logic
-
-        result = await game_instance.generate_message(
-            agent_id=agent.agent_id,
-            phase=GamePhase.DAY,
-            game_round=2,
-        )
-
-        assert result == expected_text, 'wrong message text returned'
-        mock_logic.generate_message.assert_awaited_once_with(
-            phase=GamePhase.DAY,
-            game_round=2,
-        )
-
-    async def test_generate_message_raises_for_unknown_agent(
-        self,
-        game_instance: Game,
-    ) -> None:
-        """Test generate_message raises KeyError when the agent is not registered."""
-        with pytest.raises(KeyError):
-            await game_instance.generate_message(
-                agent_id=999,
-                phase=GamePhase.NIGHT,
-                game_round=1,
-            )
-
-    async def test_answer_question_delegates_to_agent_logic(
-        self,
-        db: Database,
-        game_instance: Game,
-    ) -> None:
-        """Test answer_question forwards the call to the registered agent logic."""
-        persona = await db.get_persona(1)
-        state = AgentStateIn(
-            role=AgentRole.CITIZEN,
-            status=AgentStatus.ALIVE,
-            persona_id=persona.persona_id,
-        )
-
-        agent = await game_instance.initialize_agent(
-            state=state,
-            persona=persona,
-            game_id=game_instance.shared.game_id,
-        )
-        expected_answer = 'answer text'
-        mock_logic = Mock()
-        mock_logic.answer_question = AsyncMock(return_value=expected_answer)
-        game_instance.shared.agents[agent.agent_id] = mock_logic
-
-        result = await game_instance.answer_question(
-            agent_id=agent.agent_id,
-            question_text='Who is the mafia?',
-        )
-
-        assert result == expected_answer, 'wrong answer text returned'
-        mock_logic.answer_question.assert_awaited_once_with('Who is the mafia?')
+        assert result is expected_state, 'not expected game state'

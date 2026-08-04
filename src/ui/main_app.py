@@ -159,13 +159,11 @@ class MafiaAdminApp:
             )
 
         feed = self.game.event_bus.get()
-        if feed is None:
-            return
-        elif isinstance(feed, Message):
+        if isinstance(feed, Message):
             self._message_feed.add_message(feed)
-        elif isinstance(feed, VoteEvent):
+        if isinstance(feed, VoteEvent):
             self._message_feed.add_vote(feed)
-        elif isinstance(feed, AgentAnswer):
+        if isinstance(feed, AgentAnswer):
             self._message_feed.add_answer(feed)
 
     async def _on_game_started(self) -> None:
