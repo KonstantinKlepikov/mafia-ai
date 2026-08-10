@@ -85,12 +85,12 @@ exclude = [
     ".venv/",
 ]
 
-mypy_path = ["src", "tests", "app"]
+mypy_path = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "tests", "app"]
+pythonpath = ["src", "tests"]
 python_files = "test_*.py"
 testpaths = "tests"
 norecursedirs = ["venv*", ".venv"]
