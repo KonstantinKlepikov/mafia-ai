@@ -10,7 +10,7 @@ from schemas.enums import (
 
 
 class Message(BaseModel):
-    """Message exchanged via the RabbitMQ broker.
+    """Message for agent conversation.
 
     - `sender_id`: sender identifier. System identifier is always 1
     - `content`: message text
@@ -31,11 +31,7 @@ class Message(BaseModel):
 
 
 class VoteEvent(BaseModel):
-    """Vote event submitted by an agent.
-
-    Consumed by the orchestrator to tally votes.
-
-    """
+    """Vote event submitted by an agent."""
 
     voter_id: int = Field(..., description='ID of the voting agent')
     target_id: int = Field(..., description='ID of the vote target')
@@ -96,8 +92,8 @@ class AgentStateOut(AgentStateIn):
 class Agent(BaseModel):
     """Agent information.
 
-    - `state`: agent state
-    - `persona`: persona data
+    - state (AgentStateOut): agent state
+    - persona (Persona): persona data
 
     """
 
@@ -113,11 +109,7 @@ class AgentCount(BaseModel):
 
 
 class HostQuestion(BaseModel):
-    """A question sent by the human host to a specific agent.
-
-    Published to routing key `host.question.{agent_id}` via RabbitMQ.
-
-    """
+    """A question sent by the human host to a specific agent."""
 
     question_id: str = Field(..., description='Unique question identifier (UUID)')
     target_agent_id: int = Field(..., description='Numeric ID of the agent being asked')
@@ -125,11 +117,7 @@ class HostQuestion(BaseModel):
 
 
 class AgentAnswer(BaseModel):
-    """An agent's answer to a host question.
-
-    Published to routing key `host.answer.{question_id}` via RabbitMQ.
-
-    """
+    """An agent's answer to a host question."""
 
     question_id: str = Field(..., description='ID of the question being answered')
     agent_id: int = Field(..., description='Numeric ID of the answering agent')
