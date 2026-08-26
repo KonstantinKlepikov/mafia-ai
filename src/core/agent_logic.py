@@ -4,12 +4,11 @@ from config import MafiaSettings
 from core.llm import LLM
 from data import Database
 from schemas import (
-    AgentRole,
+    Role,
     GamePhase,
     Message,
     MessageItem,
     MessageRequest,
-    MessageRole,
     Persona,
     SystemPromptKey,
     TargetAudience,
@@ -59,7 +58,7 @@ class AgentLogic:
 
         """
         state = await self.db.get_agent_state(self.agent_id)
-        if state.role != AgentRole.MAFIA:
+        if state.role != Role.MAFIA:
             return ''
 
         hidden = True if phase == GamePhase.NIGHT else False
@@ -77,11 +76,11 @@ class AgentLogic:
         )
 
         message = Message(
-            sender_id=self.agent_id,
+            agent_id=self.agent_id,
             content=text,
             phase=phase,
             round=game_round,
-            target_audience=TargetAudience.MAFIA_ONLY if hidden else TargetAudience.ALL,
+            target=TargetAudience.MAFIA_ONLY if hidden else TargetAudience.ALL,
         )
         await self.db.insert_message(message=message)
         logger.info(f'Agent {self.agent_id} generated message for: {phase}')
@@ -136,11 +135,11 @@ class AgentLogic:
                 f'Agent {self.agent_id} LLM vote response invalid: {ex.__str__()}'
             )
 
-    async def answer_question(self, question_text: str) -> str:
+    async def answer_question(self, content: str) -> str:
         """Generate answer to host question.
 
         Args:
-            question_text: Question from the host.
+            content: Question from the host.
 
         Returns:
             Generated answer text.
@@ -151,7 +150,7 @@ class AgentLogic:
         host_question_template = await self.db.get_system_prompt(
             key=SystemPromptKey.host_question_template
         )
-        extra_prompt = host_question_template.format(question_text=question_text)
+        extra_prompt = host_question_template.format(content=content)
         text = await self._generate_llm_response(
             extra_prompt,
             max_tokens=self.settings.message_max_tokens,
@@ -176,19 +175,17 @@ class AgentLogic:
 
         messages: list[MessageItem] = []
         for msg in state.message_history:
-            if msg.sender_id == self.agent_id:
-                messages.append(
-                    MessageItem(role=MessageRole.ASSISTANT, content=msg.content)
-                )
+            if msg.agent_id == self.agent_id:
+                messages.append(MessageItem(role=Role.ASSISTANT, content=msg.content))
             else:
                 messages.append(
                     MessageItem(
-                        role=MessageRole.USER,
-                        content=f'[{msg.sender_id}]: {msg.content}',
+                        role=Role.USER,
+                        content=f'[{msg.agent_id}]: {msg.content}',
                     )
                 )
 
-        messages.append(MessageItem(role=MessageRole.USER, content=extra_user_msg))
+        messages.append(MessageItem(role=Role.USER, content=extra_user_msg))
 
         request = MessageRequest(
             system_prompt=self.persona.prompt,

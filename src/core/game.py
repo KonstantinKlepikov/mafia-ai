@@ -11,8 +11,7 @@ from data import Database
 from schemas import (
     Agent,
     AgentAnswer,
-    AgentRole,
-    AgentStateIn,
+    AgentStateInit,
     AgentStatus,
     EmptySharingException,
     GamePhase,
@@ -21,6 +20,7 @@ from schemas import (
     HostDecisionAction,
     Message,
     Persona,
+    Role,
     VoteEvent,
 )
 
@@ -100,7 +100,7 @@ class Game:
 
     async def initialize_agent(
         self,
-        state: AgentStateIn,
+        state: AgentStateInit,
         persona: Persona,
         game_id: int,
     ) -> AgentLogic:
@@ -124,7 +124,7 @@ class Game:
 
     async def eliminate_agent(self, agent_id: int) -> None:
         """Mark an agent as eliminated and remove it from the in-memory registry."""
-        del self.shared.agents[agent_id]
+        self.shared.agents.pop(agent_id)
         await self.db.update_agent_status(
             agent_id=agent_id,
             status=AgentStatus.ELIMINATED,
@@ -160,8 +160,8 @@ class Game:
         # NOTE: is blocked calls, but no matter
         agents: dict[int, AgentLogic] = {}
         system_agent = await self.initialize_agent(
-            state=AgentStateIn(
-                role=AgentRole.SYSTEM,
+            state=AgentStateInit(
+                role=Role.SYSTEM,
                 status=AgentStatus.ALIVE,
                 persona_id=system,
             ),
@@ -172,8 +172,8 @@ class Game:
         mafia_agents_ids = []
         for m in mafia:
             mafia_agent = await self.initialize_agent(
-                state=AgentStateIn(
-                    role=AgentRole.MAFIA,
+                state=AgentStateInit(
+                    role=Role.MAFIA,
                     status=AgentStatus.ALIVE,
                     persona_id=m,
                 ),
@@ -186,8 +186,8 @@ class Game:
         cityzen_agents_ids = []
         for c in cityzen:
             cityzen_agent = await self.initialize_agent(
-                state=AgentStateIn(
-                    role=AgentRole.CITIZEN,
+                state=AgentStateInit(
+                    role=Role.CITIZEN,
                     status=AgentStatus.ALIVE,
                     persona_id=c,
                 ),
@@ -273,14 +273,14 @@ class Game:
     async def ask_agent(
         self,
         agent_id: int,
-        question_text: str,
+        content: str,
         timeout: float = 60.0,
     ) -> str:
         """Ask agent a question and return the answer.
 
         Args:
             agent_id: ID of the agent to ask.
-            question_text: Question text from the host.
+            content: Question text from the host.
             timeout: Maximum seconds to wait for answer.
 
         Returns:
@@ -288,32 +288,23 @@ class Game:
 
         """
         try:
-            answer_text = await asyncio.wait_for(
-                self.shared.agents[agent_id].answer_question(question_text),
+            content = await asyncio.wait_for(
+                self.shared.agents[agent_id].answer_question(content),
                 timeout=timeout,
             )
 
             answer = AgentAnswer(
                 question_id=str(uuid.uuid4()),
                 agent_id=agent_id,
-                answer_text=answer_text,
+                content=content,
             )
 
             self.event_bus.publish(feed=answer)
 
-            return answer_text
+            return content
         except Exception as exc:
             logger.warning(f'Failed to get answer from {agent_id}: {exc.__str__()}')
             raise
-
-    async def force_stop_agent(self, agent_id: int) -> None:
-        """Force-eliminate an agent.
-
-        Args:
-            agent_id: ID of the agent to remove from the game.
-
-        """
-        await self._eliminate_agent(agent_id)
 
     @staticmethod
     def split_personas(
@@ -340,18 +331,14 @@ class Game:
         """
         try:
             while self.game_active:
-                mafia = await self.db.get_mafia_ids(
-                    game_id=self.shared.game_id,
-                    status=AgentStatus.ALIVE,
-                )
                 logger.info('--- NIGHT ---')
                 game_state = await self._transition_phase(phase=GamePhase.NIGHT)
                 await self._run_speak_phase(mafia_only=True, game_state=game_state)
 
                 logger.info('--- NIGHT_VOTE ---')
-                await self._transition_phase(phase=GamePhase.NIGHT_VOTE)
+                game_state = await self._transition_phase(phase=GamePhase.NIGHT_VOTE)
                 night_votes = await self._collect_votes(
-                    expected=len(mafia),
+                    expected=len(game_state.mafia),
                     suffix='night',
                 )
 
@@ -359,7 +346,7 @@ class Game:
                 game_state = await self._transition_phase(phase=GamePhase.RESOLVE_NIGHT)
                 eliminated_id = resolve_votes(votes=night_votes)
                 if eliminated_id:
-                    await self._eliminate_agent(agent_id=eliminated_id)
+                    await self.eliminate_agent(agent_id=eliminated_id)
                 if self._check_and_handle_win():
                     break
 
@@ -368,18 +355,17 @@ class Game:
                 await self._run_speak_phase(mafia_only=False, game_state=game_state)
 
                 logger.info('--- DAY_VOTE ---')
-                await self._transition_phase(phase=GamePhase.DAY_VOTE)
-                alive = await self.db.get_agents_ids(
-                    game_id=self.shared.game_id,
-                    status=AgentStatus.ALIVE,
+                game_state = await self._transition_phase(phase=GamePhase.DAY_VOTE)
+                day_votes = await self._collect_votes(
+                    expected=len(game_state.alive),
+                    suffix='day',
                 )
-                day_votes = await self._collect_votes(expected=len(alive), suffix='day')
 
                 logger.info('--- HOST_DECISION ---')
                 game_state = await self._transition_phase(phase=GamePhase.HOST_DECISION)
                 eliminated_id = await self._wait_for_host_decision(votes=day_votes)
                 if eliminated_id:
-                    await self._eliminate_agent(agent_id=eliminated_id)
+                    await self.eliminate_agent(agent_id=eliminated_id)
                 if self._check_and_handle_win():
                     break
 
@@ -405,25 +391,7 @@ class Game:
         """
         await self.db.update_game_phase(game_id=self.shared.game_id, phase=phase)
         logger.info(f'Phase -> {phase}')
-        game_state = await self.db.get_game_state(game_id=self.shared.game_id)
-        return game_state
-
-    async def _eliminate_agent(self, agent_id: int) -> None:
-        """Remove agent from alive list, publish state, and eliminate via manager.
-
-        Args:
-            agent_id: ID of the agent to eliminate.
-
-        """
-        alive = await self.db.get_agents_ids(
-            game_id=self.shared.game_id,
-            status=AgentStatus.ALIVE,
-        )
-        if agent_id not in alive:
-            return
-
-        await self.eliminate_agent(agent_id)
-        logger.info(f'Agent {agent_id} eliminated')
+        return await self.db.get_game_state(game_id=self.shared.game_id)
 
     async def _run_speak_phase(self, mafia_only: bool, game_state: GameState) -> None:
         """Request agents to generate messages during NIGHT or DAY speaking phase.
@@ -435,20 +403,9 @@ class Game:
         TODO: test me, concurent
 
         """
-        if mafia_only:
-            targets = await self.db.get_mafia_ids(
-                game_id=self.shared.game_id,
-                status=AgentStatus.ALIVE,
-            )
-        else:
-            targets = await self.db.get_agents_ids(
-                game_id=self.shared.game_id,
-                status=AgentStatus.ALIVE,
-            )
-        if not targets:
-            return
-
+        targets = game_state.mafia if mafia_only else game_state.citizen
         tasks: list[asyncio.Task] = []
+
         try:
             async with asyncio.TaskGroup() as tg:
                 for agent_id in targets:
@@ -466,7 +423,6 @@ class Game:
         [
             self.event_bus.publish(
                 feed=Message(
-                    sender_id=agent_id,
                     agent_id=agent_id,
                     round=game_state.round,
                     phase=game_state.phase,
@@ -541,25 +497,25 @@ class Game:
         ):
             return None
         if self.shared.host_decision.action == HostDecisionAction.OVERRIDE:
-            return self.shared.host_decision.target_id
+            return self.shared.host_decision.agent_id
 
     async def _check_and_handle_win(self) -> bool:
         """Check win conditions and set GAME_OVER phase if the game has ended.
 
+        Args:
+            game_state (GameState): game state
+
         Returns:
             True if the game is over, False if it should continue.
 
-        TODO: test me, concurent
+        TODO: test me
 
         """
         if self.game_active:
-            agents_count = await self.db.get_agents_count(
-                game_id=self.shared.game_id,
-                status=AgentStatus.ALIVE,
-            )
+            game_state = await self.db.get_game_state(game_id=self.shared.game_id)
 
-            if agents_count.mafia == 0:
-                logger.info('Citizens win: all mafia agents eliminated')
+            if len(game_state.mafia) == 0:
+                logger.info('Citizens win: all mafia eliminated')
                 await self.db.update_game_phase(
                     game_id=self.shared.game_id,
                     phase=GamePhase.GAME_OVER,
@@ -567,8 +523,8 @@ class Game:
                 self.game_active = False
                 return True
 
-            if agents_count.citizen <= agents_count.mafia:
-                logger.info('Mafia wins: citizens are outnumbered')
+            if len(game_state.citizen) == 0:
+                logger.info('Mafia wins: citizens are eliminated')
                 await self.db.update_game_phase(
                     game_id=self.shared.game_id,
                     phase=GamePhase.GAME_OVER,
@@ -576,7 +532,10 @@ class Game:
                 self.game_active = False
                 return True
 
-        return False
+            return False
+
+        logger.info('Game isnt active')
+        return True
 
     def _drain_vote_queue(self) -> None:
         """Discard any votes left in the queue from previous phases."""

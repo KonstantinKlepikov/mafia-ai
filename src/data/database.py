@@ -13,14 +13,16 @@ from loguru import logger
 
 from schemas import (
     AgentCount,
-    AgentRole,
-    AgentStateIn,
-    AgentStateOut,
+    Role,
+    AgentStateInit,
+    AgentState,
     AgentStatus,
+    AgentSummary,
     GamePhase,
     GameState,
     Message,
     Persona,
+    SummaryType,
     SystemPromptKey,
 )
 
@@ -127,17 +129,38 @@ class Database:
             """
             CREATE TABLE IF NOT EXISTS agent_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sender_id INTEGER NOT NULL,
+                agent_id INTEGER NOT NULL,
                 content TEXT NOT NULL,
                 round INTEGER NOT NULL,
-                phase INTEGER NOT NULL,
-                target_audience TEXT NOT NULL,
-                FOREIGN KEY(sender_id) REFERENCES agent_states(id)
+                phase TEXT NOT NULL,
+                target TEXT NOT NULL,
+                FOREIGN KEY(agent_id) REFERENCES agent_states(id)
             )
             """
         )
 
-        # store system prompts separately (id, text)
+        # TODO: test me
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS agent_messages_key
+            ON agent_messages(agent_id)
+            """
+        )
+
+        # TODO: test me
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agents_summary (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id INTEGER NOT NULL UNIQUE,
+                messages TEXT NOT NULL,
+                questions TEXT NOT NULL,
+                answers TEXT NOT NULL,
+                FOREIGN KEY(agent_id) REFERENCES agent_states(id)
+            )
+            """
+        )
+
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS system_prompts (
@@ -148,7 +171,6 @@ class Database:
             """
         )
 
-        # index on key for quick lookup
         await conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_system_prompts_key
@@ -409,7 +431,17 @@ class Database:
                 ) as alive,
                 group_concat(
                     CASE WHEN st.status = 'ELIMINATED' THEN st.id END, ','
-                ) as eliminated
+                ) as eliminated,
+                group_concat(
+                    CASE WHEN st.role = 'MAFIA'
+                    AND st.status = 'ALIVE'
+                    THEN st.id END, ','
+                ) as mafia,
+                group_concat(
+                    CASE WHEN st.role = 'CITIZEN'
+                    AND st.status = 'ALIVE'
+                    THEN st.id END, ','
+                ) as citizen
             FROM game_state gs
             LEFT JOIN agent_states st ON gs.id = st.game_id AND st.role <> 'SYSTEM'
             WHERE gs.id = ?
@@ -423,13 +455,12 @@ class Database:
             raise ValueError(f'Game not found: {game_id}')
 
         # parse strings produced by group_concat
-        alive_csv = row['alive']
-        eliminated_csv = row['eliminated']
-
-        alive = [int(x) for x in alive_csv.split(',')] if alive_csv else []
+        alive = [int(x) for x in row['alive'].split(',')] if row['alive'] else []
         eliminated = (
-            [int(x) for x in eliminated_csv.split(',')] if eliminated_csv else []
+            [int(x) for x in row['eliminated'].split(',')] if row['eliminated'] else []
         )
+        mafia = [int(x) for x in row['mafia'].split(',')] if row['mafia'] else []
+        citizen = [int(x) for x in row['citizen'].split(',')] if row['citizen'] else []
 
         return GameState(
             game_id=row['id'],
@@ -437,13 +468,15 @@ class Database:
             phase=GamePhase(row['phase']),
             alive=alive,
             eliminated=eliminated,
+            mafia=mafia,
+            citizen=citizen,
         )
 
-    async def init_agent(self, state: AgentStateIn, game_id: int) -> int:
+    async def init_agent(self, state: AgentStateInit, game_id: int) -> int:
         """Insert new agent.
 
         Args:
-            state (AgentStateIn): AgentState to persist.
+            state (AgentStateInit): AgentState to persist.
             game_id (int): current game.
 
         Returns:
@@ -452,8 +485,7 @@ class Database:
         """
         cursor = await self.conn.execute(
             """
-            INSERT INTO agent_states
-            (game_id, role, status, persona_id)
+            INSERT INTO agent_states (game_id, role, status, persona_id)
             VALUES (?, ?, ?, ?)
             """,
             (
@@ -464,8 +496,23 @@ class Database:
             ),
         )
 
+        cursor = await self.conn.execute('SELECT last_insert_rowid() as agent_id')
+        row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError('Failed to create agent')
+
+        new_agent_id = row['agent_id']
+
+        await self.conn.execute(
+            """
+            INSERT INTO agents_summary (agent_id, messages, questions, answers)
+            VALUES (?, '', '', '')
+            """,
+            (new_agent_id,),
+        )
+
         await self.conn.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return new_agent_id
 
     async def update_agent_status(self, agent_id: int, status: AgentStatus) -> None:
         """Update agent status (ALIVE or ELIMINATED).
@@ -494,15 +541,15 @@ class Database:
         cursor = await self.conn.execute(
             """
             INSERT INTO agent_messages
-            (sender_id, content, round, phase, target_audience)
+            (agent_id, content, round, phase, target)
             VALUES (?, ?, ?, ?, ?)
             """,
             (
-                message.sender_id,
+                message.agent_id,
                 message.content,
                 message.round,
                 message.phase,
-                message.target_audience.value,
+                message.target.value,
             ),
         )
 
@@ -521,8 +568,8 @@ class Database:
         """
         cursor = await self.conn.execute(
             """
-            SELECT sender_id, content, round, phase, target_audience
-            FROM agent_messages WHERE sender_id = ?
+            SELECT agent_id, content, round, phase, target
+            FROM agent_messages WHERE agent_id = ?
             ORDER BY id
             """,
             (agent_id,),
@@ -533,23 +580,23 @@ class Database:
 
         for mr in msg_rows:
             msg_dict = {
-                'sender_id': mr['sender_id'],
+                'agent_id': mr['agent_id'],
                 'content': mr['content'],
                 'round': mr['round'],
                 'phase': mr['phase'],
-                'target_audience': mr['target_audience'],
+                'target': mr['target'],
             }
             messages.append(Message.model_validate(msg_dict))
         return messages
 
-    async def get_agent_state(self, agent_id: int) -> AgentStateOut:
+    async def get_agent_state(self, agent_id: int) -> AgentState:
         """Get agent state and messages by ID.
 
         Args:
             agent_id (int): agent identifier.
 
         Returns:
-            AgentStateOut.
+            AgentState.
 
         """
         cursor = await self.conn.execute(
@@ -562,15 +609,15 @@ class Database:
                 json_group_array(
                     CASE WHEN am.id IS NOT NULL THEN
                         json_object(
-                            'sender_id', am.sender_id,
+                            'agent_id', am.agent_id,
                             'content', am.content,
                             'round', am.round,
                             'phase', am.phase,
-                            'target_audience', am.target_audience
+                            'target', am.target
                         ) END
                 ) as messages
             FROM agent_states st
-            LEFT JOIN agent_messages am ON st.id = am.sender_id
+            LEFT JOIN agent_messages am ON st.id = am.agent_id
             WHERE st.id = ?
             GROUP BY st.id
             """,
@@ -596,9 +643,9 @@ class Database:
 
             messages = [Message.model_validate(m) for m in parsed if m is not None]
 
-        return AgentStateOut(
+        return AgentState(
             agent_id=row['id'],
-            role=AgentRole(row['role']),
+            role=Role(row['role']),
             persona_id=row['persona_id'],
             status=AgentStatus(row['status']),
             message_history=messages,
@@ -608,14 +655,14 @@ class Database:
         self,
         game_id: int,
         status: AgentStatus,
-    ) -> list[AgentStateOut]:
+    ) -> list[AgentState]:
         """Get states for agents in a game, aggregating messages.
 
         Args:
             game_id (int): game identifier.
 
         Returns:
-            list[AgentStateOut]: states for alive agents in the game.
+            list[AgentState]: states for alive agents in the game.
 
         """
         cursor = await self.conn.execute(
@@ -628,15 +675,15 @@ class Database:
                 json_group_array(
                         CASE WHEN am.id IS NOT NULL THEN
                             json_object(
-                                'sender_id', am.sender_id,
+                                'agent_id', am.agent_id,
                                 'content', am.content,
                                 'round', am.round,
                                 'phase', am.phase,
-                                'target_audience', am.target_audience
+                                'target', am.target
                             ) END
                     ) as messages
                 FROM agent_states st
-                LEFT JOIN agent_messages am ON st.id = am.sender_id
+                LEFT JOIN agent_messages am ON st.id = am.agent_id
                 WHERE st.game_id = ? AND st.status = ? AND st.role <> "SYSTEM"
             GROUP BY st.id
             ORDER BY st.id
@@ -645,7 +692,7 @@ class Database:
         )
 
         rows = await cursor.fetchall()
-        agents: list[AgentStateOut] = []
+        agents: list[AgentState] = []
 
         for row in rows:
             msgs_json = row['messages']
@@ -660,9 +707,9 @@ class Database:
                 messages = [Message.model_validate(m) for m in parsed if m]
 
             agents.append(
-                AgentStateOut(
+                AgentState(
                     agent_id=row['id'],
-                    role=AgentRole(row['role']),
+                    role=Role(row['role']),
                     persona_id=row['persona_id'],
                     status=AgentStatus(row['status']),
                     message_history=messages,
@@ -763,3 +810,63 @@ class Database:
             mafia=row['mafia'],  # type: ignore[index]
             citizen=row['citizen'],  # type: ignore[index]
         )
+
+    async def get_agent_summary(self, agent_id: int) -> AgentSummary:
+        """Get conversations summary of agent
+
+        Args:
+            agent_id (int): agent id
+
+        Raises:
+            ValueError: agent summary not found
+
+        Returns:
+            AgentSummary: summary
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT
+                messages, questions, answers
+            FROM agents_summary
+            WHERE agent_id = ?
+            """,
+            (agent_id,),
+        )
+
+        row = await cursor.fetchone()
+
+        if row is None:
+            raise ValueError(f'Agent summary not found: {agent_id}')
+
+        return AgentSummary(
+            agent_id=agent_id,
+            messages=row['messages'],  # type: ignore[index]
+            questions=row['questions'],  # type: ignore[index]
+            answers=row['answers'],  # type: ignore[index]
+        )
+
+    async def update_agent_summary(
+        self,
+        agent_id: int,
+        summary: str,
+        summary_type: SummaryType,
+    ) -> None:
+        """Update conversations summary of agent
+
+        Args:
+            agent_id (int): agent id
+            summary (str): text to update
+            summary_type (SummaryType): type of updated summarization
+
+        """
+        await self.conn.execute(
+            f"""
+            UPDATE agents_summary
+            SET {summary_type.value} = ?
+            WHERE agent_id = ?
+            """,
+            (summary, agent_id),
+        )
+
+        await self.conn.commit()

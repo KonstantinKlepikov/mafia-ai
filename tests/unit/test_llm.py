@@ -1,7 +1,7 @@
 from types import MethodType, SimpleNamespace
 
 from core.llm import LLM
-from schemas.llm_schemas import MessageItem, MessageRequest
+from schemas.llm_schemas import MessageItem, MessageRequest, Role
 
 
 class TestLLM:
@@ -13,7 +13,7 @@ class TestLLM:
         request = MessageRequest(
             system_prompt='You are a helpful assistant.',
             conversation='Some previous spiking',
-            messages=[MessageItem(role='user', content='Hello!')],
+            messages=[MessageItem(role=Role.SYSTEM, content='Hello!')],
             max_tokens=100,
         )
 

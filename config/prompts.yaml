@@ -119,4 +119,4 @@ game_prompts:
     It is time to vote. Living players: {candidates}. Choose one player to {vote_action}. Respond with ONLY the player ID from the list above, nothing else.
 
   host_question_template: |
-    The host asks you: "{question_text}". Answer in character, concisely.
+    The host asks you: "{content}". Answer in character, concisely.

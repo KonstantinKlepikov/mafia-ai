@@ -1,12 +1,6 @@
-from enum import StrEnum
-
 from pydantic import BaseModel, Field
 
-
-class MessageRole(StrEnum):
-    USER = 'user'
-    ASSISTANT = 'assistant'
-    SYSTEM = 'system'
+from schemas.enums import Role
 
 
 class MessageItem(BaseModel):
@@ -14,15 +8,12 @@ class MessageItem(BaseModel):
 
     Attrs:
 
-        role (MessageRole): one of 'user', 'assistant', or 'system'
+        role (Role): one of 'user', 'assistant', or 'system'
         content (str): message text
 
     """
 
-    role: MessageRole = Field(
-        ...,
-        description="Message role: 'user', 'assistant', or 'system'",
-    )
+    role: Role = Field(..., description='Message role')
     content: str = Field(..., description='Message content')
 
 
@@ -52,14 +43,14 @@ class MessageRequest(BaseModel):
     def request(self) -> list[dict[str, str]]:
         msg = [
             {
-                'role': MessageRole.SYSTEM.value,
+                'role': Role.SYSTEM.value,
                 'content': self.system_prompt,
             },
         ]
         if self.conversation:
             msg.append(
                 {
-                    'role': MessageRole.SYSTEM.value,
+                    'role': Role.SYSTEM.value,
                     'content': self.conversation,
                 }
             )

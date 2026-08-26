@@ -5,7 +5,7 @@ import pytest
 from config import MafiaSettings
 from core.game import Game, Shared
 from data.database import Database
-from schemas import AgentRole, AgentStateIn, AgentStatus, GamePhase
+from schemas import Role, AgentStateInit, AgentStatus, GamePhase
 
 
 @pytest.fixture(scope='function')
@@ -43,8 +43,8 @@ class TestGameAgentLifecycle:
     ) -> None:
         """Test initialize_agent stores state and creates an AgentLogic instance."""
         persona = await db.get_persona(1)
-        state = AgentStateIn(
-            role=AgentRole.CITIZEN,
+        state = AgentStateInit(
+            role=Role.CITIZEN,
             status=AgentStatus.ALIVE,
             persona_id=persona.persona_id,
         )
@@ -57,7 +57,7 @@ class TestGameAgentLifecycle:
 
         assert agent.agent_id == 1, 'wrong agent id'
         stored_state = await db.get_agent_state(agent_id=agent.agent_id)
-        assert stored_state.role == AgentRole.CITIZEN, 'wrong role persisted'
+        assert stored_state.role == Role.CITIZEN, 'wrong role persisted'
         assert stored_state.status == AgentStatus.ALIVE, 'wrong status persisted'
         assert stored_state.persona_id == persona.persona_id, (
             'wrong persona id persisted'
@@ -70,8 +70,8 @@ class TestGameAgentLifecycle:
     ) -> None:
         """Test eliminate_agent unregisters the agent and updates its state."""
         persona = await db.get_persona(1)
-        state = AgentStateIn(
-            role=AgentRole.CITIZEN,
+        state = AgentStateInit(
+            role=Role.CITIZEN,
             status=AgentStatus.ALIVE,
             persona_id=persona.persona_id,
         )

@@ -10,7 +10,15 @@ class SystemPromptKey(str, Enum):
     host_question_template = 'host_question_template'
 
 
-class AgentRole(str, Enum):
+class SummaryType(str, Enum):
+    """Summary keys"""
+
+    MESSAGES = 'messages'
+    QUESTIONS = 'questions'
+    ANSWERS = 'answers'
+
+
+class Role(str, Enum):
     """Agent role in the game."""
 
     CITIZEN = 'CITIZEN'

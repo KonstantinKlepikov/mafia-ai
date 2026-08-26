@@ -159,8 +159,8 @@ class HostDecisionPanel:
 
     async def _handle_override(self, e: ft.ControlEvent) -> None:
         """Handle override button click."""
-        target_id = self._override_dropdown.value
-        if not target_id:
+        agent_id = self._override_dropdown.value
+        if not agent_id:
             if e.page:
                 e.page.show_dialog(
                     ft.SnackBar(
@@ -171,8 +171,8 @@ class HostDecisionPanel:
             return
 
         await self._send_decision(
-            HostDecision(action=HostDecisionAction.OVERRIDE, target_id=target_id),
-            f'Host: OVERRIDE → {target_id}',
-            f'Sent: OVERRIDE → {target_id}',
+            HostDecision(action=HostDecisionAction.OVERRIDE, agent_id=agent_id),
+            f'Host: OVERRIDE → {agent_id}',
+            f'Sent: OVERRIDE → {agent_id}',
             e.page,
         )
