@@ -1,10 +1,10 @@
 from pydantic import BaseModel, Field
 
 from schemas.enums import (
-    Role,
     AgentStatus,
     GamePhase,
     HostDecisionAction,
+    Role,
     TargetAudience,
 )
 
@@ -18,35 +18,37 @@ class Message(BaseModel):
         phase (int): game phase when the message was sent
         round (int): round number (non-negative integer)
         target (TargetAudience): intended audience (ALL or MAFIA_ONLY).
-            Default to TargetAudience.AL
+            Default to TargetAudience.ALL
 
     """
 
-    agent_id: int = Field(..., description='Sender ID, e.g. agent id')
-    content: str = Field(..., description='Message text')
-    phase: GamePhase = Field(..., description='Game phase when the message was sent')
-    round: int = Field(..., ge=0, description='Round number (non-negative integer)')
-    target: TargetAudience = Field(
-        TargetAudience.ALL,
-        description='Intended audience (ALL or MAFIA_ONLY)',
-    )
+    agent_id: int
+    content: str
+    phase: GamePhase
+    round: int = Field(..., ge=0)
+    target: TargetAudience = TargetAudience.ALL
 
 
 class VoteEvent(BaseModel):
-    """Vote event submitted by an agent."""
+    """Vote event submitted by an agent.
 
-    agent_id: int = Field(..., description='ID of the voting agent')
-    target_id: int = Field(..., description='ID of the vote target')
-    phase: GamePhase = Field(
-        ..., description='Phase in which the vote was cast (DAY_VOTE or NIGHT_VOTE)'
-    )
-    round: int = Field(..., ge=0, description='Round number of the vote')
+    Attrs:
+        agent_id (int): ID of the voting agent
+        target_id (int): ID of the vote target
+        phase (GamePhase): voting phase
+        round (int): voting round
+
+    """
+
+    agent_id: int
+    target_id: int
+    phase: GamePhase
+    round: int
 
 
 class GameState(BaseModel):
     """Consolidated game state published by the orchestrator"""
 
-    game_id: int = Field(..., ge=0, description='Current game ID')
     round: int = Field(..., ge=0, description='Current round number')
     phase: GamePhase = Field(..., description='Current game phase')
     alive: list[int] = Field(default_factory=list, description='Alive agents')
@@ -71,60 +73,57 @@ class AgentStateInit(BaseModel):
     """Agent state for initialisation.
 
     Attrs:
-        role (Role): role in game of agent
+        role (Role): Game role of agent
         status (AgentStatus): game status of agent. Default to AgentStatus.ALIVE.
-        persona_id (int): persona id
+        persona_id (int): persona id (assigned at game start)
 
     """
 
-    role: Role = Field(..., description='Game role of agent')
-    status: AgentStatus = Field(
-        AgentStatus.ALIVE,
-        description='Whether the agent is alive or eliminated',
-    )
-    persona_id: int = Field(
-        ...,
-        description='Persona ID (assigned at game start)',
-    )
+    role: Role
+    status: AgentStatus = AgentStatus.ALIVE
+    persona_id: int
 
 
 class AgentState(AgentStateInit):
     """Local agent state maintained inside the agent service.
 
-    - 'agent_id'
-    - 'role'
-    - 'status'
-    - 'persona_id'
-    - `message_history` stores received and sent messages for the current game.
+    Attes:
+        agent_id (int): agent identifier
+        message_history (list[Message]): stores received and sent messages
+            for the current game.
 
     TODO: message_hystory -> summary (AgentSummary)
 
     """
 
-    agent_id: int = Field(..., description='Unique agent identifier')
-    message_history: list[Message] = Field(
-        default_factory=list,
-        description='History of messages received/sent in the current game',
-    )
+    agent_id: int
+    message_history: list[Message] = []
 
 
-class Agent(BaseModel):
+class AgentSchema(BaseModel):
     """Agent information.
 
-    - state (AgentState): agent state
-    - persona (Persona): persona data
+    Attrs:
+        state (AgentState): agent state
+        persona (Persona): persona data
 
     """
 
-    state: AgentState = Field(..., description='Agent state')
-    persona: 'Persona' = Field(..., description='Persona data')
+    state: AgentState
+    persona: 'Persona'
 
 
 class AgentCount(BaseModel):
-    """Count of mafia nd citizen"""
+    """Count of mafia nd citizen
 
-    mafia: int = Field(..., description='Mafia count')
-    citizen: int = Field(..., description='Citizen count')
+    Attrs:
+        mafia (int): Mafia count
+        citizen (int): Citizen count
+
+    """
+
+    mafia: int
+    citizen: int
 
 
 class HostQuestion(BaseModel):
@@ -167,3 +166,56 @@ class HostDecision(BaseModel):
         None,
         description='Agent to eliminate; required when action is OVERRIDE',
     )
+
+
+class MessageItem(BaseModel):
+    """Single message of agent.
+
+    Attrs:
+
+        agent_name (str): agent name
+        content (str): message text
+
+    """
+
+    agent_name: str
+    content: str
+
+
+class LLMRequest(BaseModel):
+    """Request for ollama model.
+
+    Attrs:
+
+        persona_prompt (str): Persona system prompt
+        phase_prompt (str): Curent phase system prompt
+        summary (str): Summarized conversation history for this pgase
+        messages (list[MessageItem]): Last or important messages (context)
+        max_tokens (int): maximum tokens for generation. Default to 512.
+
+    """
+
+    persona_prompt: str
+    phase_prompt: str
+    summary: str
+    messages: list[MessageItem] = []
+    max_tokens: int = 512
+
+    def prompt(self) -> str:
+        """Prompt for ollama generation
+
+        TODO: test me
+
+        """
+        txt = (
+            f'{self.persona_prompt}\n'
+            f'{self.phase_prompt}\n'
+            f'Твои воспоминания о предыдущих событиях: {self.summary}\n'
+        )
+        if self.messages:
+            txt = (
+                txt + 'Несколько запомнивщихся сообщений, сделанных другими игроками:\n'
+            )
+            for message in self.messages:
+                txt = txt + f'{message.agent_name} сказал: {message.content}\n'
+        return txt

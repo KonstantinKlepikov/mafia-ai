@@ -1,16 +1,16 @@
 import asyncio
 import random
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 
 from loguru import logger
+from ollama import AsyncClient
 
 from config import MafiaSettings
-from core.llm import LLM
-from data import Database
 from schemas import (
-    Agent,
     AgentAnswer,
+    AgentSchema,
     AgentStateInit,
     AgentStatus,
     EmptySharingException,
@@ -24,9 +24,34 @@ from schemas import (
     VoteEvent,
 )
 
-from .agent_logic import AgentLogic
+from .agent import AgentLogic
+from .crud import Database
 from .event_bus import EventBus
-from .vote_resolver import resolve_votes
+
+
+def resolve_votes(votes: list[VoteEvent]) -> int | None:
+    """Return the target with a strict majority, or None if no consensus.
+
+    A strict majority requires more than half of all cast votes for a single
+    candidate.
+
+    Args:
+        votes: List of VoteEvents cast by agents.
+
+    Returns:
+        agent_id of the candidate to eliminate, or None if no consensus.
+
+    """
+    if not votes:
+        return None
+
+    counter = Counter(v.agent_id for v in votes)
+    top_target, top_count = counter.most_common(1)[0]
+
+    if top_count > len(votes) / 2:
+        return top_target
+
+    return None
 
 
 @dataclass
@@ -35,7 +60,6 @@ class Shared:
 
     # Game state
     all_personas: dict[int, Persona]
-    game_id: int
     system_agent_id: int
     mafia_agents_ids: list[int]
     cityzen_agents_ids: list[int]
@@ -72,13 +96,13 @@ class Game:
     def __init__(
         self,
         settings: MafiaSettings,
-        llm: LLM,
         event_bus: EventBus,
         db: Database,
+        ollama: AsyncClient,
     ) -> None:
         self.settings = settings
         self.db = db
-        self.llm = llm
+        self.ollama = ollama
         self.event_bus = event_bus
         self._shared: Shared | None = None
         self._game_task: asyncio.Task | None = None  # type: ignore[type-arg]
@@ -99,20 +123,17 @@ class Game:
         self._shared = None
 
     async def initialize_agent(
-        self,
-        state: AgentStateInit,
-        persona: Persona,
-        game_id: int,
+        self, state: AgentStateInit, persona: Persona
     ) -> AgentLogic:
         """Initialize a new agent and register its logic.
 
         TODO: test me
         """
-        agent_id = await self.db.init_agent(state=state, game_id=game_id)
+        agent_id = await self.db.init_agent(state=state)
         agent = AgentLogic(
             agent_id=agent_id,
             persona=persona,
-            llm=self.llm,
+            ollama=self.ollama,
             db=self.db,
             settings=self.settings,
         )
@@ -150,8 +171,8 @@ class Game:
 
         self.event_bus.clean()
         all_personas = {p.persona_id: p for p in await self.db.get_personas()}
-        game_id = await self.db.init_game()
-        logger.debug(f'{game_id=}')
+        await self.db.clear()
+        await self.db.init_game()
 
         # roles
         system, mafia, cityzen = self.split_personas(all_personas=all_personas)
@@ -166,7 +187,6 @@ class Game:
                 persona_id=system,
             ),
             persona=all_personas[system],
-            game_id=game_id,
         )
         agents[system_agent.agent_id] = system_agent
         mafia_agents_ids = []
@@ -178,7 +198,6 @@ class Game:
                     persona_id=m,
                 ),
                 persona=all_personas[m],
-                game_id=game_id,
             )
             agents[mafia_agent.agent_id] = mafia_agent
             mafia_agents_ids.append(mafia_agent.agent_id)
@@ -192,14 +211,12 @@ class Game:
                     persona_id=c,
                 ),
                 persona=all_personas[c],
-                game_id=game_id,
             )
             agents[cityzen_agent.agent_id] = cityzen_agent
             cityzen_agents_ids.append(cityzen_agent.agent_id)
 
         self.shared = Shared(
             all_personas=all_personas,
-            game_id=game_id,
             system_agent_id=system_agent.agent_id,
             mafia_agents_ids=mafia_agents_ids,
             cityzen_agents_ids=cityzen_agents_ids,
@@ -230,42 +247,39 @@ class Game:
         self.shared.host_decision = decision
         self.shared.host_decision_event.set()
 
-    async def get_alive_agents(self) -> dict[int, Agent]:
+    async def get_alive_agents(self) -> dict[int, AgentSchema]:
         """Get info for all alive agents.
 
         Returns:
-            dict[int, Agent]: Mapping of alive agent_id to Agent.
+            dict[int, AgentSchema]: Mapping of alive agent_id to AgentSchema.
 
         TODO: test me
 
         """
-        states = await self.db.get_agents_state(
-            game_id=self.shared.game_id,
-            status=AgentStatus.ALIVE,
-        )
+        states = await self.db.get_agents_state(status=AgentStatus.ALIVE)
 
         return {
-            state.agent_id: Agent(
+            state.agent_id: AgentSchema(
                 state=state,
                 persona=self.shared.all_personas[state.persona_id],
             )
             for state in states
         }
 
-    async def get_agent(self, agent_id: int) -> Agent:
+    async def get_agent(self, agent_id: int) -> AgentSchema:
         """Get info for a single agent.
 
         Args:
             agent_id: ID of the agent to query.
 
         Returns:
-            Agent.
+            AgentSchema.
 
         TODO: test me
 
         """
         state = await self.db.get_agent_state(agent_id=agent_id)
-        return Agent(
+        return AgentSchema(
             state=state,
             persona=self.shared.all_personas[state.persona_id],
         )
@@ -327,7 +341,7 @@ class Game:
     async def _run_game_loop(self) -> None:
         """Main finite-state-machine game loop.
 
-        TODO: test me, concurent
+        TODO: test me
         """
         try:
             while self.game_active:
@@ -369,10 +383,7 @@ class Game:
                 if self._check_and_handle_win():
                     break
 
-                await self.db.update_game_round(
-                    game_id=self.shared.game_id,
-                    round=game_state.round + 1,
-                )
+                await self.db.update_game_round(round=game_state.round + 1)
         except asyncio.CancelledError:
             logger.info('Game loop cancelled')
         finally:
@@ -389,9 +400,9 @@ class Game:
             GameState
 
         """
-        await self.db.update_game_phase(game_id=self.shared.game_id, phase=phase)
+        await self.db.update_game_phase(phase=phase)
         logger.info(f'Phase -> {phase}')
-        return await self.db.get_game_state(game_id=self.shared.game_id)
+        return await self.db.get_game_state()
 
     async def _run_speak_phase(self, mafia_only: bool, game_state: GameState) -> None:
         """Request agents to generate messages during NIGHT or DAY speaking phase.
@@ -412,8 +423,7 @@ class Game:
                     tasks.append(
                         tg.create_task(
                             self.shared.agents[agent_id].generate_message(
-                                phase=game_state.phase,
-                                game_round=game_state.round,
+                                game_state=game_state
                             )
                         )
                     )
@@ -461,7 +471,7 @@ class Game:
                 )
             except asyncio.TimeoutError:
                 break
-            game_state = await self.db.get_game_state(game_id=self.shared.game_id)
+            game_state = await self.db.get_game_state()
             if vote.round != game_state.round:
                 logger.debug(
                     f'Discarding stale vote from round {vote.round} '
@@ -512,23 +522,17 @@ class Game:
 
         """
         if self.game_active:
-            game_state = await self.db.get_game_state(game_id=self.shared.game_id)
+            game_state = await self.db.get_game_state()
 
             if len(game_state.mafia) == 0:
                 logger.info('Citizens win: all mafia eliminated')
-                await self.db.update_game_phase(
-                    game_id=self.shared.game_id,
-                    phase=GamePhase.GAME_OVER,
-                )
+                await self.db.update_game_phase(phase=GamePhase.GAME_OVER)
                 self.game_active = False
                 return True
 
             if len(game_state.citizen) == 0:
                 logger.info('Mafia wins: citizens are eliminated')
-                await self.db.update_game_phase(
-                    game_id=self.shared.game_id,
-                    phase=GamePhase.GAME_OVER,
-                )
+                await self.db.update_game_phase(phase=GamePhase.GAME_OVER)
                 self.game_active = False
                 return True
 

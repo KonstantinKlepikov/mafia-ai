@@ -1,31 +1,31 @@
 from .enums import (
-    Role,
     AgentStatus,
     GamePhase,
     HostDecisionAction,
+    Role,
     SummaryType,
     SystemPromptKey,
     TargetAudience,
 )
 from .exceptions import EmptySharingException, VotingError
 from .game_schemas import (
-    Agent,
     AgentAnswer,
     AgentCount,
+    AgentSchema,
     AgentState,
     AgentStateInit,
     AgentSummary,
     GameState,
     HostDecision,
+    LLMRequest,
     Message,
+    MessageItem,
     Persona,
     VoteEvent,
 )
-from .llm_schemas import MessageItem, MessageRequest
-
 
 __all__ = [
-    'Agent',
+    'AgentSchema',
     'Role',
     'AgentAnswer',
     'AgentCount',
@@ -46,6 +46,6 @@ __all__ = [
     'HostDecision',
     'VotingError',
     'MessageItem',
-    'MessageRequest',
+    'LLMRequest',
     'SummaryType',
 ]

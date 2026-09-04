@@ -3,7 +3,7 @@ from dependency_injector.wiring import Provide, inject
 
 from core.game import Game
 from di_containers import Container
-from schemas import Agent
+from schemas import AgentSchema
 
 
 class AskAgentPanel:
@@ -49,7 +49,7 @@ class AskAgentPanel:
             expand=True,
         )
 
-    def update_agents(self, agents: dict[int, Agent]) -> None:
+    def update_agents(self, agents: dict[int, AgentSchema]) -> None:
         """Update available agents dropdown."""
         if not agents:
             self._agent_dropdown.options = []

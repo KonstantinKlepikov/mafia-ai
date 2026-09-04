@@ -1,7 +1,7 @@
 import flet as ft
 from dependency_injector.wiring import Provide, inject
 
-from core.game import Game
+from core import Game
 from di_containers import Container
 
 

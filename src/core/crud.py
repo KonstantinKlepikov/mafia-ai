@@ -13,15 +13,16 @@ from loguru import logger
 
 from schemas import (
     AgentCount,
-    Role,
-    AgentStateInit,
     AgentState,
+    AgentStateInit,
     AgentStatus,
     AgentSummary,
     GamePhase,
     GameState,
     Message,
+    MessageItem,
     Persona,
+    Role,
     SummaryType,
     SystemPromptKey,
 )
@@ -104,9 +105,8 @@ class Database:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS game_state (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                round INTEGER NOT NULL,
-                phase TEXT NOT NULL
+                round INTEGER NOT NULL DEFAULT 1,
+                phase TEXT NOT NULL DEFAULT 'NIGHT'
             )
             """
         )
@@ -115,12 +115,10 @@ class Database:
             """
             CREATE TABLE IF NOT EXISTS agent_states (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id INTEGER NOT NULL,
                 persona_id INTEGER NOT NULL,
                 role TEXT NOT NULL,
                 status TEXT NOT NULL,
-                FOREIGN KEY(persona_id) REFERENCES personas(id),
-                FOREIGN KEY(game_id) REFERENCES game_state(id)
+                FOREIGN KEY(persona_id) REFERENCES personas(id)
             )
             """
         )
@@ -313,14 +311,59 @@ class Database:
             for row in rows
         ]
 
-    async def init_game(self) -> int:
-        """Insert new started game with round 1 and phase NIGHT.
+    async def clear(self) -> None:
+        """Delete all temporal game data
 
-        Returns:
-            int: current game ID.
+        TODO: test me
 
         """
+        await self.conn.execute('PRAGMA foreign_keys = OFF')
+        await self.conn.commit()
         cursor = await self.conn.execute(
+            """SELECT name FROM sqlite_master
+            WHERE type='table'
+            AND name NOT LIKE 'sqlite_%'
+            AND name <> 'personas'
+            AND name <> 'system_prompts'
+            """
+        )
+        rows = await cursor.fetchall()
+        table_names = [r[0] for r in rows]
+
+        # Prefer deleting child tables first to avoid foreign key constraint errors
+        preferred_order = [
+            'agent_messages',
+            'agents_summary',
+            'agent_states',
+            'game_state',
+        ]
+
+        # Delete preferred tables in order if they exist
+        for name in preferred_order:
+            if name in table_names:
+                await self.conn.execute(f'DELETE FROM "{name}"')
+                await self.conn.execute(
+                    'DELETE FROM sqlite_sequence WHERE name = ?',
+                    (name,),
+                )
+                table_names.remove(name)
+
+        # Delete any remaining tables
+        for name in table_names:
+            await self.conn.execute(f'DELETE FROM "{name}"')
+            await self.conn.execute(
+                'DELETE FROM sqlite_sequence WHERE name = ?',
+                (name,),
+            )
+
+        await self.conn.commit()
+        await self.conn.execute('PRAGMA foreign_keys = ON')
+        await self.conn.commit()
+        await self.conn.execute('VACUUM')
+
+    async def init_game(self) -> None:
+        """Insert new started game with round 1 and phase NIGHT."""
+        await self.conn.execute(
             """
             INSERT INTO game_state
             (round, phase)
@@ -332,89 +375,61 @@ class Database:
             ),
         )
         await self.conn.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
 
-    async def update_game(self, game_id: int, round: int, phase: GamePhase) -> None:
+    async def update_game(self, round: int, phase: GamePhase) -> None:
         """Update game state.
 
         Args:
-            game_id: Game identifier.
-            round_num: Current round number.
+            round (int): Current round number.
+            phase (GamePhase): Current game phase.
+
+        """
+        await self.conn.execute(
+            """
+            UPDATE game_state
+            SET round = ?, phase = ?
+            """,
+            (
+                round,
+                phase.value,
+            ),
+        )
+        await self.conn.commit()
+
+    async def update_game_phase(self, phase: GamePhase) -> None:
+        """Update game state.
+
+        Args:
             phase: Current game phase.
 
         """
         await self.conn.execute(
             """
-            REPLACE INTO game_state
-            (id, round, phase)
-            VALUES (?, ?, ?)
-            """,
-            (
-                game_id,
-                round,
-                phase.value,
-            ),
-        )
-        await self.conn.commit()
-
-    async def update_game_phase(self, game_id: int, phase: GamePhase) -> None:
-        """Update game state.
-
-        Args:
-            game_id: Game identifier.
-            phase: Current game phase.
-
-        Raises:
-            ValueError: no one row updated
-
-        """
-        cursor = await self.conn.execute(
-            """
             UPDATE game_state
             SET phase = ?
-            WHERE id = ?
             """,
-            (
-                phase.value,
-                game_id,
-            ),
+            (phase.value,),
         )
-        if cursor.rowcount == 0:
-            raise ValueError(f'Game not found: {game_id}')
         await self.conn.commit()
 
-    async def update_game_round(self, game_id: int, round: int) -> None:
+    async def update_game_round(self, round: int) -> None:
         """Update game state.
 
         Args:
-            game_id: Game identifier.
-            round: Current round number.
-
-        Raises:
-            ValueError: no one row updated
+            round (int): Current round number.
 
         """
-        logger.debug(round)
-        cursor = await self.conn.execute(
+        await self.conn.execute(
             """
             UPDATE game_state
             SET round = ?
-            WHERE id = ?
             """,
-            (
-                round,
-                game_id,
-            ),
+            (round,),
         )
-        if cursor.rowcount == 0:
-            raise ValueError(f'Game not found: {game_id}')
         await self.conn.commit()
 
-    async def get_game_state(self, game_id: int) -> GameState:
+    async def get_game_state(self) -> GameState:
         """Get game state by ID.
-
-        Args:
-            game_id (int): game identifier.
 
         Returns:
             GameState.
@@ -423,7 +438,6 @@ class Database:
         cursor = await self.conn.execute(
             """
             SELECT
-                gs.id as id,
                 gs.round as round,
                 gs.phase as phase,
                 group_concat(
@@ -443,16 +457,10 @@ class Database:
                     THEN st.id END, ','
                 ) as citizen
             FROM game_state gs
-            LEFT JOIN agent_states st ON gs.id = st.game_id AND st.role <> 'SYSTEM'
-            WHERE gs.id = ?
-            GROUP BY gs.id
-            """,
-            (game_id,),
+            LEFT JOIN agent_states st ON st.role <> 'SYSTEM'
+             """
         )
         row = await cursor.fetchone()
-
-        if row is None:
-            raise ValueError(f'Game not found: {game_id}')
 
         # parse strings produced by group_concat
         alive = [int(x) for x in row['alive'].split(',')] if row['alive'] else []
@@ -463,7 +471,6 @@ class Database:
         citizen = [int(x) for x in row['citizen'].split(',')] if row['citizen'] else []
 
         return GameState(
-            game_id=row['id'],
             round=row['round'],
             phase=GamePhase(row['phase']),
             alive=alive,
@@ -472,12 +479,11 @@ class Database:
             citizen=citizen,
         )
 
-    async def init_agent(self, state: AgentStateInit, game_id: int) -> int:
+    async def init_agent(self, state: AgentStateInit) -> int:
         """Insert new agent.
 
         Args:
             state (AgentStateInit): AgentState to persist.
-            game_id (int): current game.
 
         Returns:
             int: agent ID.
@@ -485,11 +491,10 @@ class Database:
         """
         cursor = await self.conn.execute(
             """
-            INSERT INTO agent_states (game_id, role, status, persona_id)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO agent_states (role, status, persona_id)
+            VALUES (?, ?, ?)
             """,
             (
-                game_id,
                 state.role.value,
                 state.status.value,
                 state.persona_id,
@@ -589,6 +594,41 @@ class Database:
             messages.append(Message.model_validate(msg_dict))
         return messages
 
+    async def get_last_conversation(self, limit: int) -> list[MessageItem]:
+        """Get last messages from current conversation as MessageItem list.
+
+        Args:
+            limit (int): number of messages.
+
+        Returns:
+            list[MessageItem]: message hystory with agent names.
+
+        TODO: test me
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT am.agent_id, am.content, am.round, am.phase, am.target,
+                   p.name as agent_name
+            FROM agent_messages am
+            LEFT JOIN agent_states st ON st.id = am.agent_id
+            LEFT JOIN personas p ON p.id = st.persona_id
+            ORDER BY am.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+
+        msg_rows = await cursor.fetchall()
+        messages: list[MessageItem] = []
+
+        for mr in msg_rows:
+            msg_dict = {'agent_name': mr['agent_name'], 'content': mr['content']}
+            messages.append(MessageItem.model_validate(msg_dict))
+
+        # return in chronological order (oldest first)
+        return list(reversed(messages))
+
     async def get_agent_state(self, agent_id: int) -> AgentState:
         """Get agent state and messages by ID.
 
@@ -651,15 +691,11 @@ class Database:
             message_history=messages,
         )
 
-    async def get_agents_state(
-        self,
-        game_id: int,
-        status: AgentStatus,
-    ) -> list[AgentState]:
+    async def get_agents_state(self, status: AgentStatus) -> list[AgentState]:
         """Get states for agents in a game, aggregating messages.
 
         Args:
-            game_id (int): game identifier.
+            status (AgentStatus): agent status for filtering.
 
         Returns:
             list[AgentState]: states for alive agents in the game.
@@ -684,11 +720,11 @@ class Database:
                     ) as messages
                 FROM agent_states st
                 LEFT JOIN agent_messages am ON st.id = am.agent_id
-                WHERE st.game_id = ? AND st.status = ? AND st.role <> "SYSTEM"
+                WHERE st.status = ? AND st.role <> "SYSTEM"
             GROUP BY st.id
             ORDER BY st.id
             """,
-            (game_id, status.value),
+            (status.value,),
         )
 
         rows = await cursor.fetchall()
@@ -718,15 +754,10 @@ class Database:
 
         return agents
 
-    async def get_agents_ids(
-        self,
-        game_id: int,
-        status: AgentStatus,
-    ) -> list[int]:
+    async def get_agents_ids(self, status: AgentStatus) -> list[int]:
         """Get ids for agents in a game.
 
         Args:
-            game_id (int): game identifier.
             status (AgentStatus): agent status for filtering.
 
         Returns:
@@ -737,24 +768,19 @@ class Database:
             """
             SELECT id
             FROM agent_states
-            WHERE game_id = ? AND status = ? AND role <> 'SYSTEM'
+            WHERE status = ? AND role <> 'SYSTEM'
             ORDER BY id
             """,
-            (game_id, status.value),
+            (status.value,),
         )
 
         rows = await cursor.fetchall()
         return [row['id'] for row in rows]
 
-    async def get_mafia_ids(
-        self,
-        game_id: int,
-        status: AgentStatus,
-    ) -> list[int]:
+    async def get_mafia_ids(self, status: AgentStatus) -> list[int]:
         """Get ids for mafia agents in a game.
 
         Args:
-            game_id (int): game identifier.
             status (AgentStatus): agent status for filtering.
 
         Returns:
@@ -765,24 +791,19 @@ class Database:
             """
             SELECT id
             FROM agent_states
-            WHERE game_id = ? AND status = ? AND role = 'MAFIA'
+            WHERE status = ? AND role = 'MAFIA'
             ORDER BY id
             """,
-            (game_id, status.value),
+            (status.value,),
         )
 
         rows = await cursor.fetchall()
         return [row['id'] for row in rows]
 
-    async def get_agents_count(
-        self,
-        game_id: int,
-        status: AgentStatus,
-    ) -> AgentCount:
+    async def get_agents_count(self, status: AgentStatus) -> AgentCount:
         """Get citizen and mafia count.
 
         Args:
-            game_id (int): game identifier.
             status (AgentStatus): agent status for filtering.
 
         Returns:
@@ -799,9 +820,9 @@ class Database:
                     SUM(CASE WHEN role = 'CITIZEN' THEN 1 ELSE 0 END), 0
                 ) AS citizen
             FROM agent_states
-            WHERE game_id = ? AND status = ?
+            WHERE status = ?
             """,
-            (game_id, status.value),
+            (status.value,),
         )
 
         row = await cursor.fetchone()

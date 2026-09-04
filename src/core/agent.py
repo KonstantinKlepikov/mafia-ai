@@ -1,18 +1,17 @@
 from loguru import logger
+from ollama import AsyncClient
 
 from config import MafiaSettings
-from core.llm import LLM
-from data import Database
+from core.crud import Database
 from schemas import (
-    Role,
     GamePhase,
+    LLMRequest,
     Message,
-    MessageItem,
-    MessageRequest,
     Persona,
     SystemPromptKey,
     TargetAudience,
     VotingError,
+    GameState,
 )
 
 
@@ -25,8 +24,8 @@ class AgentLogic:
     Args:
         agent_id (int): agent identifier.
         persona (Persona): character details.
-        llm (LLM): direct local inference.
         db (Database): instance for state persistence.
+        ollama (AsyncClient): ollama client
 
     """
 
@@ -34,22 +33,21 @@ class AgentLogic:
         self,
         agent_id: int,
         persona: Persona,
-        llm: LLM,
         db: Database,
+        ollama: AsyncClient,
         settings: MafiaSettings,
     ) -> None:
         self.agent_id = agent_id
         self.persona = persona
-        self.llm = llm
         self.db = db
         self.settings = settings
+        self.ollama = ollama
 
-    async def generate_message(self, phase: GamePhase, game_round: int) -> str:
+    async def generate_message(self, game_state: GameState) -> str:
         """Generate a message for the current phase.
 
         Args:
-            phase: Current game phase (NIGHT or DAY).
-            game_round: Current round number.
+            game_state (GameState): Current game state.
 
         Returns:
             Generated message text.
@@ -57,42 +55,46 @@ class AgentLogic:
         TODO: test me
 
         """
-        state = await self.db.get_agent_state(self.agent_id)
-        if state.role != Role.MAFIA:
-            return ''
+        hidden = True if game_state.phase == GamePhase.NIGHT else False
 
-        hidden = True if phase == GamePhase.NIGHT else False
-
-        extra_prompt = (
+        phase_prompt = (
             await self.db.get_system_prompt(key=SystemPromptKey.night_speak)
             if hidden
             else await self.db.get_system_prompt(key=SystemPromptKey.day_speak)
         )
-        logger.debug(f'Extra prompt text: {extra_prompt}')
 
-        text = await self._generate_llm_response(
-            extra_user_msg=extra_prompt,
+        summary = await self.db.get_agent_summary(agent_id=self.agent_id)
+        messages = await self.db.get_last_conversation(
+            limit=10
+        )  # TODO: move limit to config
+
+        request = LLMRequest(
+            persona_prompt=self.persona.prompt,
+            phase_prompt=phase_prompt,
+            summary=summary,
+            messages=messages,
             max_tokens=self.settings.message_max_tokens,
         )
+
+        text = await self._agent_message(request=request)
 
         message = Message(
             agent_id=self.agent_id,
             content=text,
-            phase=phase,
-            round=game_round,
+            phase=game_state.phase,
+            round=game_state.round,
             target=TargetAudience.MAFIA_ONLY if hidden else TargetAudience.ALL,
         )
         await self.db.insert_message(message=message)
-        logger.info(f'Agent {self.agent_id} generated message for: {phase}')
+        logger.info(f'Agent {self.agent_id} generated message for: {game_state.phase}')
         logger.debug(f'Message text: {text}')
         return text
 
-    async def generate_vote(self, candidates: list[int], is_night: bool) -> int:
+    async def generate_vote(self, game_state: GameState) -> int:
         """Generate a vote for elimination.
 
         Args:
-            candidates (list[int]): alive agent IDs (excluding self).
-            is_night (bool): True for night vote, False for day vote.
+            game_state (GameState): Current game state.
 
         Raises:
             ValueError: epty list of candidates
@@ -104,6 +106,12 @@ class AgentLogic:
         TODO: test me
 
         """
+        hidden = True if game_state.phase == GamePhase.NIGHT else False
+        candidates = await self.db.get_agents_ids()
+        if hidden:
+            mafia = await self.db.get_mafia_ids()
+            candidates = [i for i in candidates if i not in mafia]
+
         if not candidates:
             raise ValueError('Empty list of candidates')
 
@@ -111,28 +119,36 @@ class AgentLogic:
             key=SystemPromptKey.vote_template
         )
 
-        extra_prompt = vote_template.format(
+        phase_prompt = vote_template.format(
             vote_action='eliminate at night'
-            if is_night
+            if hidden
             else 'vote to eliminate during the day',
             candidates=', '.join(map(str, candidates)),
         )
 
-        raw = await self._generate_llm_response(
-            extra_user_msg=extra_prompt,
-            max_tokens=self.settings.vote_max_tokens,
+        summary = self.db.get_agent_summary(agent_id=self.agent_id)
+        messages = self.db.get_last_conversation(limit=10)  # TODO: move limit to config
+
+        request = LLMRequest(
+            persona_prompt=self.persona.prompt,
+            phase_prompt=phase_prompt,
+            summary=summary,
+            messages=messages,
+            max_tokens=1,
         )
 
+        target_id = await self._agent_message(request=request)
+
         try:
-            target_id = int(raw.strip())
+            target_id = int(target_id.strip())
             if target_id not in candidates:
                 raise VotingError(
                     f'Agent {self.agent_id} LLM vote not in {candidates=}'
                 )
             return target_id
-        except Exception as ex:
+        except ValueError as err:
             raise VotingError(
-                f'Agent {self.agent_id} LLM vote response invalid: {ex.__str__()}'
+                f'Agent {self.agent_id} LLM vote response invalid: {err.__str__()}'
             )
 
     async def answer_question(self, content: str) -> str:
@@ -151,19 +167,18 @@ class AgentLogic:
             key=SystemPromptKey.host_question_template
         )
         extra_prompt = host_question_template.format(content=content)
-        text = await self._generate_llm_response(
+        text = await self._agent_message(
             extra_prompt,
             max_tokens=self.settings.message_max_tokens,
         )
         logger.info(f'Agent {self.agent_id} answered question: {text[:10]}...')
         return text
 
-    async def _generate_llm_response(self, extra_user_msg: str, max_tokens: int) -> str:
-        """Build context from history and call the LLM service.
+    async def _agent_message(self, request: LLMRequest) -> str:
+        """Build prompt from given data and call ollama.
 
         Args:
-            extra_user_msg: Instruction appended as the final user turn.
-            max_tokens: Upper bound on generated tokens.
+            request (LLMRequest): data for request ollama.
 
         Returns:
             str: generated text from the LLM.
@@ -171,26 +186,19 @@ class AgentLogic:
         TODO: test me
 
         """
-        state = await self.db.get_agent_state(agent_id=self.agent_id)
 
-        messages: list[MessageItem] = []
-        for msg in state.message_history:
-            if msg.agent_id == self.agent_id:
-                messages.append(MessageItem(role=Role.ASSISTANT, content=msg.content))
-            else:
-                messages.append(
-                    MessageItem(
-                        role=Role.USER,
-                        content=f'[{msg.agent_id}]: {msg.content}',
-                    )
-                )
+        prompt = request.prompt()
 
-        messages.append(MessageItem(role=Role.USER, content=extra_user_msg))
-
-        request = MessageRequest(
-            system_prompt=self.persona.prompt,
-            messages=messages,
-            max_tokens=max_tokens,
+        response = await self.ollama.generate(
+            model=self.settings.ollama_model,
+            prompt=prompt,
+            options={'num_predict': request.max_tokens},
         )
 
-        return await self.llm.message(request=request)
+        if response.response is None:
+            logger.warning('Empty ollama response')
+
+        return response.response if response.response else ''
+
+    async def _agent_messages_summary(self) -> str:
+        return ''

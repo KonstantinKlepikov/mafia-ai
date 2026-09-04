@@ -5,9 +5,7 @@ import pytest
 from ollama import AsyncClient
 
 from config import AdminFletSettings, MafiaSettings
-from core.agent_logic import AgentLogic
-from core.llm import LLM
-from data.database import Database
+from core import AgentLogic, Database
 from di_containers import Container
 from ui.main_app import MafiaAdminApp
 
@@ -55,34 +53,30 @@ async def ollama_cl() -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture(scope='function')
-async def llm(
-    settings: MafiaSettings,
+def agent_logic(
+    db: Database,
     ollama_cl: AsyncClient,
-) -> AsyncGenerator[LLM, None]:
-    """Llm"""
-    yield LLM(settings=settings, ollama=ollama_cl)
-
-
-@pytest.fixture(scope='function')
-def agent_logic(db: Database, llm: LLM, settings: MafiaSettings) -> AgentLogic:
+    settings: MafiaSettings,
+) -> AgentLogic:
     """Create an AgentLogic instance with mocked dependencies."""
     persona = Mock()
     persona.prompt = 'test persona prompt'
     return AgentLogic(
         agent_id=1,
         persona=persona,
-        llm=llm,
+        ollama=ollama_cl,
         db=db,
         settings=settings,
     )
 
 
 @pytest.fixture(scope='function')
-async def game_id(db: Database) -> int:
-    """game"""
-    game_id = await db.init_game()
-    assert game_id == 1, 'wrong game id'
-    return game_id
+async def game(db: Database) -> AsyncGenerator[None, None]:
+    """Init game"""
+    await db.clear()
+    await db.init_game()
+    yield
+    await db.clear()
 
 
 @pytest.fixture(scope='session')

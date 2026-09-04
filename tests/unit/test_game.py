@@ -1,31 +1,30 @@
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
+from ollama import AsyncClient
 
 from config import MafiaSettings
-from core.game import Game, Shared
-from data.database import Database
-from schemas import Role, AgentStateInit, AgentStatus, GamePhase
+from core import Database, Game, Shared
+from schemas import AgentStateInit, AgentStatus, GamePhase, Role
 
 
 @pytest.fixture(scope='function')
-def shared(game_id: int) -> MagicMock:
+def shared(game) -> MagicMock:
     s = MagicMock()
     s.agents = {}
-    s.game_id = game_id
     return s
 
 
 @pytest.fixture(scope='function')
 def game_instance(
     db: Database,
+    ollama_cl: AsyncClient,
     settings: MafiaSettings,
     shared: Shared,
 ) -> Game:
-    llm = Mock()
     game = Game(
         settings=settings,
-        llm=llm,
+        ollama=ollama_cl,
         event_bus=Mock(),
         db=db,
     )
@@ -49,11 +48,7 @@ class TestGameAgentLifecycle:
             persona_id=persona.persona_id,
         )
 
-        agent = await game_instance.initialize_agent(
-            state=state,
-            persona=persona,
-            game_id=game_instance.shared.game_id,
-        )
+        agent = await game_instance.initialize_agent(state=state, persona=persona)
 
         assert agent.agent_id == 1, 'wrong agent id'
         stored_state = await db.get_agent_state(agent_id=agent.agent_id)
@@ -76,11 +71,7 @@ class TestGameAgentLifecycle:
             persona_id=persona.persona_id,
         )
 
-        agent = await game_instance.initialize_agent(
-            state=state,
-            persona=persona,
-            game_id=game_instance.shared.game_id,
-        )
+        agent = await game_instance.initialize_agent(state=state, persona=persona)
         game_instance.shared.agents[agent.agent_id] = agent
 
         await game_instance.eliminate_agent(agent_id=agent.agent_id)
@@ -107,10 +98,7 @@ class TestGameAgentLifecycle:
         result = await game_instance._transition_phase(phase=GamePhase.DAY)
 
         game_instance.db.update_game_phase.assert_awaited_once_with(
-            game_id=game_instance.shared.game_id,
             phase=GamePhase.DAY,
         )
-        game_instance.db.get_game_state.assert_awaited_once_with(
-            game_id=game_instance.shared.game_id,
-        )
+        game_instance.db.get_game_state.assert_awaited_once_with()
         assert result is expected_state, 'not expected game state'
