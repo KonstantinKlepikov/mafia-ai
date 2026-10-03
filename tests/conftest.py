@@ -1,29 +1,99 @@
-import os
-from unittest.mock import AsyncMock, MagicMock
+from typing import AsyncGenerator
+from unittest.mock import Mock
 
 import pytest
+from ollama import AsyncClient
 
-from shared.models import GamePhase, GameState
+from config import AdminFletSettings, MafiaSettings
+from core import AgentLogic, Database
+from di_containers import Container
+from schemas import Role, SystemPromptKey
+from ui.main_app import MafiaAdminApp
 
-os.environ['OTEL_SDK_DISABLED'] = 'true'
+
+class DbContextManager:
+    def __init__(self, db: Database):
+        self.db = db
+
+    async def __aenter__(self):
+        await self.db.connect()
+        return self.db
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.db.close()
+        return False
 
 
-@pytest.fixture
-def mock_orchestrator_svc() -> MagicMock:
-    """Mocked OrchestratorService for orchestrator API tests."""
-    svc = MagicMock()
-    svc.begin_game = AsyncMock()
-    svc.get_game_state = MagicMock(
-        return_value=GameState(
-            round=0,
-            phase=GamePhase.DAY,
-            alive_agents=[],
-            eliminated=[],
-        )
+@pytest.fixture(scope='session')
+def settings() -> MafiaSettings:
+    """Override settings"""
+    config_dict = {}  # type: ignore
+    return MafiaSettings(**config_dict)  # type: ignore
+
+
+@pytest.fixture(scope='session')
+def ui_settings() -> AdminFletSettings:
+    """Override settings"""
+    config_dict = {}  # type: ignore
+    return AdminFletSettings(**config_dict)  # type: ignore
+
+
+@pytest.fixture(scope='function')
+async def db() -> AsyncGenerator[Database, None]:
+    """Db"""
+    async with DbContextManager(Database()) as db:
+        yield db
+
+
+@pytest.fixture(scope='function')
+async def ollama_cl() -> AsyncGenerator[AsyncClient, None]:
+    """Llm"""
+    yield AsyncClient()
+
+
+@pytest.fixture(scope='function')
+def agent_logic(
+    db: Database,
+    ollama_cl: AsyncClient,
+    settings: MafiaSettings,
+) -> AgentLogic:
+    """Create an AgentLogic instance with mocked dependencies."""
+    persona = Mock()
+    persona.prompt = 'test persona prompt'
+    prompts: dict[SystemPromptKey, str] = {SystemPromptKey.system_prompt: 'test prompt'}
+    return AgentLogic(
+        agent_id=1,
+        role=Role.MAFIA,
+        persona=persona,
+        prompts=prompts,
+        ollama=ollama_cl,
+        db=db,
+        settings=settings,
     )
-    svc.submit_host_decision = MagicMock()
-    svc.get_agents_info = AsyncMock(return_value={})
-    svc.get_agent_info = AsyncMock(return_value=None)
-    svc.ask_agent = AsyncMock()
-    svc.force_stop_agent = AsyncMock()
-    return svc
+
+
+@pytest.fixture(scope='function')
+async def game(db: Database) -> AsyncGenerator[None, None]:
+    """Init game"""
+    await db.clear()
+    await db.init_game()
+    yield
+    await db.clear()
+
+
+@pytest.fixture(scope='session')
+def container(
+    settings: MafiaSettings,
+    ui_settings: AdminFletSettings,
+) -> Container:
+    """Override container"""
+    container = Container()
+    container.settings.override(settings)
+    container.ui_settings.override(ui_settings)
+    return container
+
+
+@pytest.fixture(scope='session')
+def app(container: Container) -> MafiaAdminApp:
+    """Override container"""
+    return MafiaAdminApp()

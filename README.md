@@ -4,49 +4,23 @@ AI-powered Mafia game with autonomous agents.
 
 ## 🏗️ Architecture
 
-**Integrated architecture**:
-
 ```text
-┌─────────────────────────────────────────┐     ┌─────────────┐
-│     Game Service (Unified)              │     │    LLM      │
-│   ┌──────────┐    ┌────────────────┐    │────▶│   Pool      │
-│   │  Flet UI │    │ FSM + Agents   │    │ HTTP│             │
-│   │ (Thread) │◀──▶│ (EventBus)     │    │     └─────────────┘
-│   └──────────┘    └────────────────┘    │           │ HTTP
-│                                         │           ▼
-└─────────────────────────────────────────┘     ┌─────────────┐
-                                                │   Ollama    │
-                                                │   Runtime   │
-                                                └─────────────┘
+┌─────────────────────────────────────────────────────────┐
+│         Mafia-AI Service (Monolithic)                   │
+│                                                         │
+│   ┌──────────┐    ┌────────────────┐     ┌────────────┐ │
+│   │  Flet UI │    │ FSM + Agents   │     │  Ollama    │ │
+│   │ (Thread) │◀──▶│ (EventBus)     │────▶│ Subprocess │ │
+│   └──────────┘    └────────────────┘     └────────────┘ │
+│                          │                              │
+│                          ▼                              │
+│                   ┌──────────────┐                      │
+│                   │  LLM         │                      │
+│                   │ (Direct Call)│                      │
+│                   └──────────────┘                      │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
 ```
-
-### Core Services
-
-- **Game Service** — Unified service combining game orchestration, agent management, and admin UI:
-    - **FSM Engine** — Game state machine handling phases (day/night/voting)
-    - **Agent Manager** — Embedded AI agents with direct async communication
-    - **EventBus** — Internal pub/sub for UI synchronization (MESSAGE, VOTE, ANSWER, STATE_CHANGE events)
-    - **Flet UI** — Integrated admin interface running in daemon thread (port 8550)
-    - **FastAPI** — REST API for external integrations (port 8081)
-- **LLM Pool** — Parallel LLM inference with round-robin load balancing
-- **SQLite (in-memory)** — Persona storage
-
-### Key Architecture Principles
-
-**Monolithic Design**:
-
-- Single service with embedded UI and business logic
-- Direct method calls instead of HTTP/RabbitMQ for UI communication
-- EventBus for internal event propagation
-- Separate daemon thread for Flet UI (non-blocking)
-
-**Benefits**:
-
-- ⚡ Zero network overhead for UI operations (direct method calls)
-- 🔄 Simplified deployment (single container)
-- 💾 Lighter dependencies (no separate UI service)
-- 🎯 Better resource utilization (shared event loop)
-- 🧪 Easier testing (in-process communication)
 
 ## 🚀 Build & Run
 
@@ -86,82 +60,38 @@ make down
 make check
 ```
 
-### Service Restart Example
+### Service Management
 
 ```bash
-docker compose -f infra/docker-compose.yml restart mafia-ai-game-service
+# Restart service
+docker compose -f infra/docker-compose.yml restart mafia-ai-service
+
+# View logs
+docker compose -f infra/docker-compose.yml logs -f mafia-ai-service
+
+# Rebuild after code changes
+make serve  # or: docker compose -f infra/docker-compose.yml up --build
 ```
 
-### Access Points
+## 🌐 Access Points
 
-- **Admin UI**: http://localhost:38550 (Flet web interface)
-
-## 📁 Project Structure
-
-```txt
-mafia-ai/
-├── config/
-│   └── prompts.yaml           # Persona definitions (10 characters)
-├── src/
-│   ├── services/
-│   │   ├── game_service/      # Unified game + UI service (FastAPI + Flet)
-│   │   │   ├── core/
-│   │   │   │   ├── event_bus.py       # Internal pub/sub
-│   │   │   │   ├── service.py         # Game FSM + agents
-│   │   │   │   └── agent_logic.py     # Agent behavior
-│   │   │   ├── ui/
-│   │   │   │   ├── service_adapter.py # Direct method calls
-│   │   │   │   └── event_adapter.py   # EventBus subscription
-│   │   │   └── main_app.py    # Integrated Flet UI
-│   │   ├── llm/               # LLM pool manager
-│   └── shared/
-│       ├── models.py          # Pydantic models
-│       └── database.py        # SQLite async wrapper
-├── tests/
-│   └── unit/                  # Unit tests (83 tests)
-└── infra/
-    ├── docker-compose.yml     # Service definitions
-    ├── llm/                   # LLM service Dockerfile
-    └── game_service/          # Admin Dockerfile
-```
-
-## 🧪 Testing
-
-```bash
-# Run all unit tests
-poetry run pytest tests/unit/ -v
-
-# Run specific test file
-poetry run pytest tests/unit/test_database.py -v
-
-# Run with coverage
-poetry run pytest tests/unit/ --cov=src --cov-report=html
-```
-
-## 🌐 Endpoints
-
-### Services
-
-- **[LLM Service](http://localhost:38080)**:
-- **[Admin-flet](http://localhost:38550)**
+- **[Admin UI](http://localhost:38550)** — Flet web interface for game management
 
 ## 📊 Configuration
 
 ### Environment Variables
 
-Key environment variables (see `infra/.env.example`):
+Key environment variables (see `infra/.env`):
 
 ```bash
-# LLM Settings
-OLLAMA_URL=http://mafia-ai-ollama:11434
-OLLAMA_MODEL=llama3.1:8b
-LLM_POOL_SIZE=0  # 0 = auto-detect based on GPU/CPU
+# Ollama Settings
+OLLAMA_MODEL=smollm2:135m
 
 # Game Settings
-AGENT_COUNT=10
-MAFIA_COUNT=2
-PHASE_DURATION_SECONDS=300
-VOTE_TIMEOUT_SECONDS=60
+PHASE_DURATION_SECONDS=60
+VOTE_TIMEOUT_SECONDS=30
+MESSAGE_MAX_TOKENS=150
+VOTE_MAX_TOKENS=50
 ```
 
 ### Persona Configuration

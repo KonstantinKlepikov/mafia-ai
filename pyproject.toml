@@ -15,16 +15,14 @@ PyYAML = "^6.0"
 annotated-types = "^0.7.0"
 python-dotenv = "^1.0.1"
 pydantic = "^2.12.5"
-ollama = "^0.6.1"
-fastapi = "^0.115"
-uvicorn = { extras = ["standard"], version = "^0.34" }
-httpx = "^0.28"
 flet = "0.85.2"
 pydantic-settings = "^2.13.1"
 loguru = "^0.7.3"
 aiosqlite = "^0.20.0"
 requests = "^2.33.1"
-aiofiles = "^25.1.0"
+dependency-injector = "^4.49.0"
+asyncstdlib = "^3.14.0"
+ollama = "^0.6.2"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -48,6 +46,7 @@ gevent = "^25.0"
 types-requests = "^2.33.0.20260518"
 types-pyyaml = "^6.0.12.20260518"
 types-aiofiles = "^25.1.0.20260518"
+watchdog = { extras = ["watchmedo"], version = "^6.0.0" }
 
 
 [build-system]
