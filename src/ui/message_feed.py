@@ -37,7 +37,7 @@ class MessageFeed:
 
     def add_message(self, msg: Message) -> None:
         """Add message to feed."""
-        icon = '🌙' if msg.target_audience == TargetAudience.MAFIA_ONLY else '☀️'
+        icon = '🌙' if msg.target == TargetAudience.MAFIA_ONLY else '☀️'
         item = ft.Container(
             content=ft.Column(
                 controls=[
@@ -47,7 +47,7 @@ class MessageFeed:
                         color=ft.Colors.SECONDARY,
                     ),
                     ft.Text(
-                        f'{msg.sender_id}: {msg.content}',
+                        f'{msg.agent_id}: {msg.content}',
                         size=14,
                         selectable=True,
                     ),
@@ -74,7 +74,7 @@ class MessageFeed:
                         color=ft.Colors.SECONDARY,
                     ),
                     ft.Text(
-                        f'{vote.voter_id} → {vote.target_id}',
+                        f'{vote.agent_id} → {vote.target_id}',
                         size=14,
                         weight=ft.FontWeight.BOLD,
                     ),
@@ -101,7 +101,7 @@ class MessageFeed:
                         color=ft.Colors.SECONDARY,
                     ),
                     ft.Text(
-                        f'{answer.agent_id}: {answer.answer_text}',
+                        f'{answer.agent_id}: {answer.content}',
                         size=14,
                         italic=True,
                     ),

@@ -5,7 +5,7 @@ from dependency_injector.wiring import Provide, inject
 from loguru import logger
 
 from config import AdminFletSettings, MafiaSettings
-from core.game import Game
+from core import Game
 from di_containers import Container
 from schemas import AgentAnswer, Message, VoteEvent
 
@@ -144,7 +144,7 @@ class MafiaAdminApp:
     async def _update_ui(self) -> None:
         """Update UI with latest data from game service and event bus."""
 
-        game_state = await self.game.db.get_game_state(game_id=self.game.shared.game_id)
+        game_state = await self.game.db.get_game_state()
         agents = await self.game.get_alive_agents()
 
         self._status_panel.update_state(game_state=game_state, agents=agents)

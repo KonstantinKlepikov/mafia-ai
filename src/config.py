@@ -10,8 +10,6 @@ class MafiaSettings(BaseSettings):
         ollama_model: Name of the model to use for generation.
         ollama_timeout: Timeout in seconds for each ollama subprocess call.
         llm_pool_size: Number of parallel model instances (0 = auto-detect).
-        agent_count: Total number of agents in the game.
-        mafia_count: Number of mafia agents to assign.
         phase_duration_seconds: Max duration per NIGHT / DAY speaking phase.
         vote_timeout_seconds: Timeout when waiting for all votes to arrive.
         db_yaml_path: Path to prompts.yaml config file.
@@ -29,8 +27,6 @@ class MafiaSettings(BaseSettings):
     llm_pool_size: int = 0
 
     # Game settings (formerly from GameSettings)
-    agent_count: int = 10
-    mafia_count: int = 3
     phase_duration_seconds: int = 180
     vote_timeout_seconds: int = 60
 

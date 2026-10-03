@@ -20,10 +20,8 @@ pydantic-settings = "^2.13.1"
 loguru = "^0.7.3"
 aiosqlite = "^0.20.0"
 requests = "^2.33.1"
-aiofiles = "^25.1.0"
 dependency-injector = "^4.49.0"
 asyncstdlib = "^3.14.0"
-async-lru = "^2.3.0"
 ollama = "^0.6.2"
 
 
