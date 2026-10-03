@@ -4,15 +4,8 @@ import pytest
 from ollama import AsyncClient
 
 from config import MafiaSettings
-from core import Database, Game, Shared
+from core import Database, Game
 from schemas import AgentStateInit, AgentStatus, GamePhase, Role
-
-
-@pytest.fixture(scope='function')
-def shared(game) -> MagicMock:
-    s = MagicMock()
-    s.agents = {}
-    return s
 
 
 @pytest.fixture(scope='function')
@@ -20,7 +13,6 @@ def game_instance(
     db: Database,
     ollama_cl: AsyncClient,
     settings: MafiaSettings,
-    shared: Shared,
 ) -> Game:
     game = Game(
         settings=settings,
@@ -28,7 +20,7 @@ def game_instance(
         event_bus=Mock(),
         db=db,
     )
-    game.shared = shared
+    game._init_from_yaml(yaml_path=settings.db_yaml_path)
     return game
 
 
@@ -41,8 +33,9 @@ class TestGameAgentLifecycle:
         game_instance: Game,
     ) -> None:
         """Test initialize_agent stores state and creates an AgentLogic instance."""
-        persona = await db.get_persona(1)
+        persona = game_instance.personas[1]
         state = AgentStateInit(
+            id=5,
             role=Role.CITIZEN,
             status=AgentStatus.ALIVE,
             persona_id=persona.persona_id,
@@ -50,7 +43,7 @@ class TestGameAgentLifecycle:
 
         agent = await game_instance.initialize_agent(state=state, persona=persona)
 
-        assert agent.agent_id == 1, 'wrong agent id'
+        assert agent.agent_id == 5, 'wrong agent id'
         stored_state = await db.get_agent_state(agent_id=agent.agent_id)
         assert stored_state.role == Role.CITIZEN, 'wrong role persisted'
         assert stored_state.status == AgentStatus.ALIVE, 'wrong status persisted'
@@ -64,19 +57,20 @@ class TestGameAgentLifecycle:
         game_instance: Game,
     ) -> None:
         """Test eliminate_agent unregisters the agent and updates its state."""
-        persona = await db.get_persona(1)
+        persona = game_instance.personas[1]
         state = AgentStateInit(
+            id=5,
             role=Role.CITIZEN,
             status=AgentStatus.ALIVE,
             persona_id=persona.persona_id,
         )
 
         agent = await game_instance.initialize_agent(state=state, persona=persona)
-        game_instance.shared.agents[agent.agent_id] = agent
+        game_instance.agents[agent.agent_id] = agent
 
         await game_instance.eliminate_agent(agent_id=agent.agent_id)
 
-        assert agent.agent_id not in game_instance.shared.agents, (
+        assert agent.agent_id not in game_instance.agents, (
             'agent logic should be removed'
         )
         stored_state = await db.get_agent_state(agent_id=agent.agent_id)

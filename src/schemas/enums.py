@@ -8,6 +8,7 @@ class SystemPromptKey(str, Enum):
     day_speak = 'day_speak'
     vote_template = 'vote_template'
     host_question_template = 'host_question_template'
+    system_prompt = 'system_prompt'
 
 
 class SummaryType(str, Enum):

@@ -15,7 +15,7 @@ class EventBus:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[Message | AgentAnswer | VoteEvent] = asyncio.Queue()
 
-    def clean(self) -> None:
+    def clear(self) -> None:
         while not self._queue.empty():
             self._queue.get_nowait()
             self._queue.task_done()
@@ -29,7 +29,7 @@ class EventBus:
         Invokes all registered callbacks immediately in current thread.
 
         Args:
-            feed: Event data (typically dict or Pydantic model).
+            feed: Event data.
 
         """
         logger.debug(f'Publishing in queue: {feed.__class__.__name__}')

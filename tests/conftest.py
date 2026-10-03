@@ -7,6 +7,7 @@ from ollama import AsyncClient
 from config import AdminFletSettings, MafiaSettings
 from core import AgentLogic, Database
 from di_containers import Container
+from schemas import Role, SystemPromptKey
 from ui.main_app import MafiaAdminApp
 
 
@@ -38,11 +39,9 @@ def ui_settings() -> AdminFletSettings:
 
 
 @pytest.fixture(scope='function')
-async def db(settings: MafiaSettings) -> AsyncGenerator[Database, None]:
+async def db() -> AsyncGenerator[Database, None]:
     """Db"""
     async with DbContextManager(Database()) as db:
-        personas_id = await db.init_from_yaml(settings.db_yaml_path)
-        assert len(personas_id) == 11, 'wrong personas inited'
         yield db
 
 
@@ -61,9 +60,12 @@ def agent_logic(
     """Create an AgentLogic instance with mocked dependencies."""
     persona = Mock()
     persona.prompt = 'test persona prompt'
+    prompts: dict[SystemPromptKey, str] = {SystemPromptKey.system_prompt: 'test prompt'}
     return AgentLogic(
         agent_id=1,
+        role=Role.MAFIA,
         persona=persona,
+        prompts=prompts,
         ollama=ollama_cl,
         db=db,
         settings=settings,

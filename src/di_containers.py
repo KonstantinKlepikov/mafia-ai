@@ -9,11 +9,10 @@ from core import Database, EventBus, Game, setup_logging
 
 
 @asynccontextmanager
-async def init_game(db: Database, settings: MafiaSettings):
+async def init_db(db: Database, settings: MafiaSettings):
     try:
         setup_logging(level=settings.log_level)
         await db.connect()
-        await db.init_from_yaml(yaml_path=settings.db_yaml_path)
         logger.info(f'Game engine started, log_level={settings.log_level}')
     except Exception as exc:
         logger.error(f'Game engine failed to start: {exc.__str__()}')
@@ -40,7 +39,7 @@ class Container(containers.DeclarativeContainer):
     ollama = providers.Singleton(AsyncClient)
     event_bus = providers.Singleton(EventBus)
     db = providers.Singleton(Database)
-    init_game_engine = providers.Resource(init_game, db=db, settings=settings)
+    init_game_engine = providers.Resource(init_db, db=db, settings=settings)
     game = providers.Singleton(
         Game,
         settings=settings,

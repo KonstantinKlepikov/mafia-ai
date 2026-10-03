@@ -1,9 +1,11 @@
 import asyncio
+import os
 import random
 import uuid
 from collections import Counter
-from dataclasses import dataclass, field
+from pathlib import Path
 
+import yaml
 from loguru import logger
 from ollama import AsyncClient
 
@@ -13,7 +15,6 @@ from schemas import (
     AgentSchema,
     AgentStateInit,
     AgentStatus,
-    EmptySharingException,
     GamePhase,
     GameState,
     HostDecision,
@@ -21,8 +22,10 @@ from schemas import (
     Message,
     Persona,
     Role,
+    SystemPromptKey,
     VoteEvent,
 )
+from schemas.constants import CITIZEN_IDS, MAFIA_IDS, SYSTEM_AGENT_ID
 
 from .agent import AgentLogic
 from .crud import Database
@@ -54,27 +57,6 @@ def resolve_votes(votes: list[VoteEvent]) -> int | None:
     return None
 
 
-@dataclass
-class Shared:
-    """Cached and shared data of game"""
-
-    # Game state
-    all_personas: dict[int, Persona]
-    system_agent_id: int
-    mafia_agents_ids: list[int]
-    cityzen_agents_ids: list[int]
-
-    # Vote collection
-    vote_queue: asyncio.Queue[VoteEvent]
-
-    # Host decision synchronisation
-    host_decision: HostDecision
-    host_decision_event: asyncio.Event
-
-    # Agents
-    agents: dict[int, AgentLogic] = field(default_factory=dict)
-
-
 class Game:
     """Unified game orchestrator and agent manager.
 
@@ -104,26 +86,82 @@ class Game:
         self.db = db
         self.ollama = ollama
         self.event_bus = event_bus
-        self._shared: Shared | None = None
-        self._game_task: asyncio.Task | None = None  # type: ignore[type-arg]
+
+        # game constants
+        self.system_agent_id: int = SYSTEM_AGENT_ID
+        self.mafia_ids: list[int] = MAFIA_IDS
+        self.cityzen_ids: list[int] = CITIZEN_IDS
         self.game_active: bool = False
 
-    @property
-    def shared(self) -> Shared:
-        if not self._shared:
-            raise EmptySharingException('Game is not started.')
-        return self._shared
+        # Vote collection
+        self.vote_queue: asyncio.Queue[VoteEvent] = asyncio.Queue()
 
-    @shared.setter
-    def shared(self, shared: Shared) -> None:
-        self._shared = shared
+        # Host decision synchronisation
+        self.host_decision: HostDecision = HostDecision()
+        self.host_decision_event: asyncio.Event = asyncio.Event()
 
-    @shared.deleter
-    def shared(self) -> None:
-        self._shared = None
+        # Agents
+        self.agents: dict[int, AgentLogic] = {}
+        self.personas: dict[int, Persona] = {}
+        self.prompts: dict[SystemPromptKey, str] = {}
+
+        # game loop task
+        self._game_task: asyncio.Task | None = None  # type: ignore[type-arg]
+
+        # init game specs
+        self._init_from_yaml(yaml_path=self.settings.db_yaml_path)
+
+    def _init_from_yaml(self, yaml_path: Path) -> None:
+        """Load personas from YAML config to memory. System is olways first.
+        Prompts is loaded to.
+
+        Args:
+            yaml_path (Path): Path to prompts.yaml config file.
+
+        Raises:
+            FileNotFoundError: If yaml_path does not exist.
+
+        """
+        if not os.path.exists(yaml_path):
+            raise FileNotFoundError(f'Config file not found: {yaml_path}')
+
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            config = yaml.safe_load(content)
+
+            self.personas = {
+                persona_data['id']: Persona(
+                    persona_id=persona_data['id'],
+                    name=persona_data['name'],
+                    persona_type=persona_data['type'],
+                    prompt=persona_data['prompt'],
+                )
+                for persona_data in config.get('personas', [])
+            }
+
+            self.prompts = {
+                SystemPromptKey(k): v for k, v in config.get('game_prompts', {}).items()
+            }
+
+    def _split_personas(self) -> tuple[int, list[int], list[int]]:
+        """Split personas.
+
+        Returns:
+            tuple[int, list[int], list[int]]: system, mafia, cityzen
+
+        TODO: test me
+
+        """
+        system = list(self.personas.keys())[0]
+        remaining = list(self.personas.keys())[1:]
+        mafia = random.sample(remaining, 3)
+        cityzen = [p for p in remaining if p != system and p not in mafia]
+        return (system, mafia, cityzen)
 
     async def initialize_agent(
-        self, state: AgentStateInit, persona: Persona
+        self,
+        state: AgentStateInit,
+        persona: Persona,
     ) -> AgentLogic:
         """Initialize a new agent and register its logic.
 
@@ -132,7 +170,9 @@ class Game:
         agent_id = await self.db.init_agent(state=state)
         agent = AgentLogic(
             agent_id=agent_id,
+            role=state.role,
             persona=persona,
+            prompts=self.prompts,
             ollama=self.ollama,
             db=self.db,
             settings=self.settings,
@@ -145,7 +185,7 @@ class Game:
 
     async def eliminate_agent(self, agent_id: int) -> None:
         """Mark an agent as eliminated and remove it from the in-memory registry."""
-        self.shared.agents.pop(agent_id)
+        self.agents.pop(agent_id)
         await self.db.update_agent_status(
             agent_id=agent_id,
             status=AgentStatus.ELIMINATED,
@@ -161,81 +201,68 @@ class Game:
         TODO: test me
 
         """
-        try:
-            if self.game_active:
-                logger.info('A game is already in progress. ')
-            else:
-                del self.shared
-        except EmptySharingException:
-            ...
+        if self.game_active:
+            logger.info('A game is already in progress. ')
+            return
 
-        self.event_bus.clean()
-        all_personas = {p.persona_id: p for p in await self.db.get_personas()}
-        await self.db.clear()
-        await self.db.init_game()
+        await self.clear()
 
         # roles
-        system, mafia, cityzen = self.split_personas(all_personas=all_personas)
+        system, mafia, cityzen = self._split_personas()
 
         # Initialize agents via agent manager
         # NOTE: is blocked calls, but no matter
-        agents: dict[int, AgentLogic] = {}
         system_agent = await self.initialize_agent(
             state=AgentStateInit(
+                id=self.system_agent_id,
                 role=Role.SYSTEM,
                 status=AgentStatus.ALIVE,
                 persona_id=system,
             ),
-            persona=all_personas[system],
+            persona=self.personas[system],
         )
-        agents[system_agent.agent_id] = system_agent
-        mafia_agents_ids = []
-        for m in mafia:
+        self.agents[self.system_agent_id] = system_agent
+        for m, id in zip(mafia, self.mafia_ids):
             mafia_agent = await self.initialize_agent(
                 state=AgentStateInit(
+                    id=id,
                     role=Role.MAFIA,
                     status=AgentStatus.ALIVE,
                     persona_id=m,
                 ),
-                persona=all_personas[m],
+                persona=self.personas[m],
             )
-            agents[mafia_agent.agent_id] = mafia_agent
-            mafia_agents_ids.append(mafia_agent.agent_id)
+            self.agents[id] = mafia_agent
 
-        cityzen_agents_ids = []
-        for c in cityzen:
+        for c, id in zip(cityzen, self.cityzen_ids):
             cityzen_agent = await self.initialize_agent(
                 state=AgentStateInit(
+                    id=id,
                     role=Role.CITIZEN,
                     status=AgentStatus.ALIVE,
                     persona_id=c,
                 ),
-                persona=all_personas[c],
+                persona=self.personas[c],
             )
-            agents[cityzen_agent.agent_id] = cityzen_agent
-            cityzen_agents_ids.append(cityzen_agent.agent_id)
+            self.agents[id] = cityzen_agent
 
-        self.shared = Shared(
-            all_personas=all_personas,
-            system_agent_id=system_agent.agent_id,
-            mafia_agents_ids=mafia_agents_ids,
-            cityzen_agents_ids=cityzen_agents_ids,
-            vote_queue=asyncio.Queue(),
-            host_decision=HostDecision(),
-            host_decision_event=asyncio.Event(),
-            agents=agents,
-        )
-        logger.debug(f'{self.shared=}')
+        await self.db.init_game()
         self._game_task = asyncio.create_task(self._run_game_loop())
         self.game_active = True
         logger.info('Game begin.')
 
-    async def end_game(self) -> None:
-        self.event_bus.clean()
-        del self.shared
+    async def clear(self) -> None:
+        self.event_bus.clear()
+        await self.db.clear()
+        while not self.vote_queue.empty():
+            self.vote_queue.get_nowait()
+            self.vote_queue.task_done()
+        self.host_decision = HostDecision()
+        self.host_decision_event.clear()
+        self.game_active = False
         if self._game_task is not None and not self._game_task.done():
             self._game_task.cancel()
-        logger.info('Game end.')
+        logger.info('Game clear.')
 
     def submit_host_decision(self, decision: HostDecision) -> None:
         """Accept a host decision and unblock the waiting game loop.
@@ -244,8 +271,8 @@ class Game:
             decision: The host's action and optional override target.
 
         """
-        self.shared.host_decision = decision
-        self.shared.host_decision_event.set()
+        self.host_decision = decision
+        self.host_decision_event.set()
 
     async def get_alive_agents(self) -> dict[int, AgentSchema]:
         """Get info for all alive agents.
@@ -261,28 +288,10 @@ class Game:
         return {
             state.agent_id: AgentSchema(
                 state=state,
-                persona=self.shared.all_personas[state.persona_id],
+                persona=self.personas[state.persona_id],
             )
             for state in states
         }
-
-    async def get_agent(self, agent_id: int) -> AgentSchema:
-        """Get info for a single agent.
-
-        Args:
-            agent_id: ID of the agent to query.
-
-        Returns:
-            AgentSchema.
-
-        TODO: test me
-
-        """
-        state = await self.db.get_agent_state(agent_id=agent_id)
-        return AgentSchema(
-            state=state,
-            persona=self.shared.all_personas[state.persona_id],
-        )
 
     async def ask_agent(
         self,
@@ -303,7 +312,7 @@ class Game:
         """
         try:
             content = await asyncio.wait_for(
-                self.shared.agents[agent_id].answer_question(content),
+                self.agents[agent_id].answer_question(content),
                 timeout=timeout,
             )
 
@@ -319,24 +328,6 @@ class Game:
         except Exception as exc:
             logger.warning(f'Failed to get answer from {agent_id}: {exc.__str__()}')
             raise
-
-    @staticmethod
-    def split_personas(
-        all_personas: dict[int, Persona],
-    ) -> tuple[int, list[int], list[int]]:
-        """Split personas.
-
-        Returns:
-            tuple[int, list[int], list[int]]: system, mafia, cityzen
-
-        TODO: test me
-
-        """
-        system = list(all_personas.keys())[0]
-        remaining = list(all_personas.keys())[1:]
-        mafia = random.sample(remaining, 3)
-        cityzen = [p for p in remaining if p != system and p not in mafia]
-        return (system, mafia, cityzen)
 
     async def _run_game_loop(self) -> None:
         """Main finite-state-machine game loop.
@@ -361,7 +352,7 @@ class Game:
                 eliminated_id = resolve_votes(votes=night_votes)
                 if eliminated_id:
                     await self.eliminate_agent(agent_id=eliminated_id)
-                if self._check_and_handle_win():
+                if await self._check_and_handle_win():
                     break
 
                 logger.info('--- DAY ---')
@@ -380,10 +371,11 @@ class Game:
                 eliminated_id = await self._wait_for_host_decision(votes=day_votes)
                 if eliminated_id:
                     await self.eliminate_agent(agent_id=eliminated_id)
-                if self._check_and_handle_win():
+                if await self._check_and_handle_win():
                     break
 
                 await self.db.update_game_round(round=game_state.round + 1)
+
         except asyncio.CancelledError:
             logger.info('Game loop cancelled')
         finally:
@@ -404,6 +396,16 @@ class Game:
         logger.info(f'Phase -> {phase}')
         return await self.db.get_game_state()
 
+    async def _safe_generate(self, agent_id: int, game_state: GameState) -> str:
+        try:
+            return await self.agents[agent_id].generate_message(game_state=game_state)
+        except Exception as exc:
+            logger.error(
+                f'Agent {agent_id} generate_message failed: '
+                f'{exc.__class__.__name__}: {exc.__str__()}'
+            )
+            return ''
+
     async def _run_speak_phase(self, mafia_only: bool, game_state: GameState) -> None:
         """Request agents to generate messages during NIGHT or DAY speaking phase.
 
@@ -421,26 +423,28 @@ class Game:
             async with asyncio.TaskGroup() as tg:
                 for agent_id in targets:
                     tasks.append(
-                        tg.create_task(
-                            self.shared.agents[agent_id].generate_message(
-                                game_state=game_state
-                            )
-                        )
+                        tg.create_task(self._safe_generate(agent_id, game_state))
                     )
         except Exception as exc:
-            logger.error(f'Message generation failed: {exc.__str__()}')
+            # TaskGroup should not surface exceptions now, but keep fallback
+            logger.error(f'Message generation failed: {exc}')
 
-        [
+        for idx, task in enumerate(tasks):
+            try:
+                content = task.result()
+            except Exception as exc:
+                logger.error(f'Unexpected task result error: {exc}')
+                content = ''
+            # agent_id is targets ordered; map by index
+            agent_id = targets[idx]
             self.event_bus.publish(
                 feed=Message(
                     agent_id=agent_id,
                     round=game_state.round,
                     phase=game_state.phase,
-                    content=task.result(),
+                    content=content,
                 )
             )
-            for task in tasks
-        ]
 
     async def _collect_votes(self, expected: int, suffix: str) -> list[VoteEvent]:
         """Collect votes from the queue until expected count or timeout.
@@ -466,9 +470,7 @@ class Game:
             if remaining <= 0:
                 break
             try:
-                vote = await asyncio.wait_for(
-                    self.shared.vote_queue.get(), timeout=remaining
-                )
+                vote = await asyncio.wait_for(self.vote_queue.get(), timeout=remaining)
             except asyncio.TimeoutError:
                 break
             game_state = await self.db.get_game_state()
@@ -496,18 +498,18 @@ class Game:
         TODO: test me
 
         """
-        self.shared.host_decision_event.clear()
-        self.shared.host_decision.action = HostDecisionAction.NOTHING
-        await self.shared.host_decision_event.wait()
-        if self.shared.host_decision.action == HostDecisionAction.APPROVE:
+        self.host_decision_event.clear()
+        self.host_decision.action = HostDecisionAction.NOTHING
+        await self.host_decision_event.wait()
+        if self.host_decision.action == HostDecisionAction.APPROVE:
             return resolve_votes(votes=votes)
         if (
-            self.shared.host_decision.action == HostDecisionAction.REJECT
-            or self.shared.host_decision.action == HostDecisionAction.NOTHING
+            self.host_decision.action == HostDecisionAction.REJECT
+            or self.host_decision.action == HostDecisionAction.NOTHING
         ):
             return None
-        if self.shared.host_decision.action == HostDecisionAction.OVERRIDE:
-            return self.shared.host_decision.agent_id
+        if self.host_decision.action == HostDecisionAction.OVERRIDE:
+            return self.host_decision.target_id
 
     async def _check_and_handle_win(self) -> bool:
         """Check win conditions and set GAME_OVER phase if the game has ended.
@@ -544,9 +546,9 @@ class Game:
     def _drain_vote_queue(self) -> None:
         """Discard any votes left in the queue from previous phases."""
         drained = 0
-        while not self.shared.vote_queue.empty():
+        while not self.vote_queue.empty():
             try:
-                self.shared.vote_queue.get_nowait()
+                self.vote_queue.get_nowait()
                 drained += 1
             except asyncio.QueueEmpty:
                 break

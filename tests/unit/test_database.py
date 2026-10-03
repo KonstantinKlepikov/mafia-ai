@@ -9,12 +9,11 @@ from schemas import (
     GamePhase,
     GameState,
     Message,
-    Persona,
     Role,
     SummaryType,
-    SystemPromptKey,
     TargetAudience,
 )
+from schemas.constants import ALL
 
 
 class TestDatabaseInit:
@@ -25,71 +24,6 @@ class TestDatabaseInit:
         assert db._conn is not None, 'connection must be established'
         await db.close()
         assert db._conn is None, 'connection must be closed'
-
-    async def test_init_from_yaml(self, db: Database) -> None:
-        """Test loading personas from YAML config."""
-        personas = await db.get_personas()
-        assert len(personas) == 11, 'expected 11 personas from config'
-        assert personas[0].persona_id == 1, 'wrong persona_id'
-        assert personas[0].name == 'system', 'wrong system persona name'
-        assert personas[1].name == 'persona_1_good_natured', 'wrong persona name'
-
-    async def test_system_prompts_initialized(self, db: Database) -> None:
-        """Test that system (game) prompts are loaded from YAML into DB."""
-        text = await db.get_system_prompt(key=SystemPromptKey.night_speak)
-        assert isinstance(text, str), 'expected string prompt text'
-        assert 'It is nighttime' in text, 'night_speak prompt not loaded correctly'
-
-    async def test_get_system_prompt_not_found(self, db: Database) -> None:
-        """Test when a system prompt row is missing, ValueError should be raised."""
-        await db.conn.execute(
-            'DELETE FROM system_prompts WHERE key = ?',
-            (SystemPromptKey.vote_template.value,),
-        )
-        await db.conn.commit()
-
-        with pytest.raises(ValueError, match='System prompt not found'):
-            await db.get_system_prompt(key=SystemPromptKey.vote_template)
-
-    async def test_get_system_prompt_cached_after_delete(self, db: Database) -> None:
-        """
-        Test cached prompt remains available after the DB row is deleted (alru_cache).
-        """
-        original = await db.get_system_prompt(key=SystemPromptKey.day_speak)
-
-        await db.conn.execute(
-            'DELETE FROM system_prompts WHERE key = ?',
-            (SystemPromptKey.day_speak.value,),
-        )
-        await db.conn.commit()
-
-        cached = await db.get_system_prompt(key=SystemPromptKey.day_speak)
-        assert cached == original, 'cached prompt should match original value'
-
-
-class TestDatabasePersona:
-    """Test persona methods"""
-
-    async def test_get_persona(self, db: Database) -> None:
-        """Test retrieving a single persona by ID."""
-        persona = await db.get_persona(3)
-        assert isinstance(persona, Persona), ' wrong result type'
-        assert persona.persona_id == 3, 'wrong persona id'
-        assert persona.name == 'persona_2_hysteric', 'wrong persona name'
-        assert persona.persona_type == 'hysteric', 'wrong persona type'
-        assert len(persona.prompt) > 0, 'wrong prompt'
-
-    async def test_get_personas(self, db: Database) -> None:
-        """Test retrieving a single persona by ID."""
-        personas = await db.get_personas()
-        assert isinstance(personas, list), ' wrong result type'
-        assert isinstance(personas[0], Persona), ' wrong subtype'
-        assert len(personas) == 11, 'wrong personas len'
-
-    async def test_get_persona_not_found(self, db: Database) -> None:
-        """Test get_persona raises ValueError for unknown ID."""
-        with pytest.raises(ValueError, match='Persona not found'):
-            await db.get_persona(999)
 
 
 class TestDatabaseGame:
@@ -125,24 +59,29 @@ class TestDatabaseGame:
         assert gs.round == 1, 'expected default round 1'
         assert gs.phase == GamePhase.NIGHT, 'expected default phase NIGHT'
         assert gs.alive == [], 'expected no alive agents'
-        assert gs.eliminated == [], 'expected no eliminated agents'
+        assert gs.eliminated == ALL, 'expected no eliminated agents'
         assert gs.mafia == [], 'expected empty mafia list'
         assert gs.citizen == [], 'expected empty citizen list'
 
     async def test_get_game_state_agents_aggregation(self, db: Database, game) -> None:
         """Test get_game_state should list alive and eliminated agent ids correctly."""
-        a1 = await db.init_agent(state=AgentStateInit(role=Role.CITIZEN, persona_id=1))
-        a2 = await db.init_agent(state=AgentStateInit(role=Role.MAFIA, persona_id=2))
-        a3 = await db.init_agent(state=AgentStateInit(role=Role.CITIZEN, persona_id=3))
+        a1 = await db.init_agent(
+            state=AgentStateInit(id=5, role=Role.CITIZEN, persona_id=2)
+        )
+        a2 = await db.init_agent(
+            state=AgentStateInit(id=2, role=Role.MAFIA, persona_id=2)
+        )
+        a3 = await db.init_agent(
+            state=AgentStateInit(id=6, role=Role.CITIZEN, persona_id=3)
+        )
 
         # eliminate agent 2
         await db.update_agent_status(agent_id=a2, status=AgentStatus.ELIMINATED)
 
         gs = await db.get_game_state()
         assert isinstance(gs, GameState), 'wrong game state type'
-        # alive should contain a1 and a3 (order may vary)
         assert gs.alive == [a1, a3], f'unexpected alive list: {gs.alive}'
-        assert gs.eliminated == [a2], 'unexpected eliminated list'
+        assert a2 in gs.eliminated, f'unexpected eliminated list {gs.eliminated}'
         assert gs.mafia == [], 'nonempty mafia list'
         assert gs.citizen == [a1, a3], 'empty citizen list'
 
@@ -153,12 +92,12 @@ class TestDatabaseAgent:
     async def test_init_and_get_agent_state(self, db: Database, game) -> None:
         """Test inserting and retrieving agent state."""
         state = AgentStateInit(
+            id=5,
             role=Role.CITIZEN,
-            persona_id=1,
+            persona_id=2,
         )
         agent_id = await db.init_agent(state=state)
-        assert agent_id == 1, 'wrong agent id'
-        assert agent_id == 1, 'wrong agent id'
+        assert agent_id == 5, 'wrong agent id'
         await db.insert_message(
             Message(
                 agent_id=agent_id, content='this', phase=GamePhase.GAME_OVER, round=7
@@ -170,7 +109,7 @@ class TestDatabaseAgent:
         assert retrieved.agent_id == agent_id, 'wrong agent id'
         assert retrieved.role == Role.CITIZEN, 'wronmg role'
         assert retrieved.status == AgentStatus.ALIVE, 'wronmg status'
-        assert retrieved.persona_id == 1, 'wrong persona id'
+        assert retrieved.persona_id == 2, 'wrong persona id'
         assert len(retrieved.message_history) == 1, 'wrong message hystory'
 
     async def test_update_agent_status_and_get_agent_state(
@@ -180,11 +119,12 @@ class TestDatabaseAgent:
     ) -> None:
         """Test updating agent status."""
         state = AgentStateInit(
+            id=5,
             role=Role.CITIZEN,
-            persona_id=4,
+            persona_id=5,
         )
         agent_id = await db.init_agent(state=state)
-        assert agent_id == 1, 'wrong agent id'
+        assert agent_id == 5, 'wrong agent id'
         await db.insert_message(
             Message(
                 agent_id=agent_id, content='this', phase=GamePhase.GAME_OVER, round=7
@@ -202,7 +142,7 @@ class TestDatabaseAgent:
     ) -> None:
         """Test each agent_id has only one summary row (unique constraint)."""
         agent_id = await db.init_agent(
-            state=AgentStateInit(role=Role.CITIZEN, persona_id=1)
+            state=AgentStateInit(id=5, role=Role.CITIZEN, persona_id=2)
         )
 
         with pytest.raises(Exception, match='UNIQUE constraint failed'):
@@ -223,7 +163,7 @@ class TestDatabaseAgent:
         """Test get_agent_summary returns empty fields after init,
         then raises when missing."""
         agent_id = await db.init_agent(
-            state=AgentStateInit(role=Role.CITIZEN, persona_id=1)
+            state=AgentStateInit(id=5, role=Role.CITIZEN, persona_id=2)
         )
 
         summary = await db.get_agent_summary(agent_id=agent_id)
@@ -246,71 +186,6 @@ class TestDatabaseAgent:
         with pytest.raises(ValueError, match='Agent not found'):
             await db.get_agent_state(999)
 
-    async def test_get_agents_ids(self, db: Database, game) -> None:
-        """Test get_agents_ids returns correct ids for alive and eliminated."""
-        state_c = AgentStateInit(role=Role.CITIZEN, persona_id=1)
-        state_m = AgentStateInit(role=Role.MAFIA, persona_id=2)
-
-        a1 = await db.init_agent(state=state_c)
-        a2 = await db.init_agent(state=state_m)
-        a3 = await db.init_agent(state=state_c)
-
-        # eliminate second agent
-        await db.update_agent_status(agent_id=a2, status=AgentStatus.ELIMINATED)
-
-        alive_ids = await db.get_agents_ids(status=AgentStatus.ALIVE)
-        eliminated_ids = await db.get_agents_ids(status=AgentStatus.ELIMINATED)
-
-        assert set(alive_ids) == {a1, a3}, f'unexpected alive ids: {alive_ids}'
-        assert set(eliminated_ids) == {a2}, (
-            f'unexpected eliminated ids: {eliminated_ids}'
-        )
-
-    async def test_get_mafia_ids(self, db: Database, game) -> None:
-        """Test get_mafia_ids returns only mafia ids filtered by status."""
-        state_c = AgentStateInit(role=Role.CITIZEN, persona_id=1)
-        state_m = AgentStateInit(role=Role.MAFIA, persona_id=2)
-        await db.init_agent(state=state_c)
-        a2 = await db.init_agent(state=state_m)
-        a3 = await db.init_agent(state=state_c)
-        await db.update_agent_status(agent_id=a3, status=AgentStatus.ELIMINATED)
-
-        mafia_alive = await db.get_mafia_ids(status=AgentStatus.ALIVE)
-        mafia_elim = await db.get_mafia_ids(status=AgentStatus.ELIMINATED)
-
-        assert mafia_alive == [a2], f'unexpected mafia alive ids: {mafia_alive}'
-        assert len(mafia_elim) == 0, f'unexpected mafia eliminated ids: {mafia_elim}'
-
-        await db.update_agent_status(agent_id=a2, status=AgentStatus.ELIMINATED)
-
-        mafia_alive = await db.get_mafia_ids(status=AgentStatus.ALIVE)
-        mafia_elim = await db.get_mafia_ids(status=AgentStatus.ELIMINATED)
-
-        assert len(mafia_alive) == 0, (
-            f'unexpected mafia alive ids after elim: {mafia_alive}'
-        )
-        assert mafia_elim == [a2], (
-            f'unexpected mafia eliminated ids after elim: {mafia_elim}'
-        )
-
-    async def test_get_agents_count(self, db: Database, game) -> None:
-        """Test get_agents_count returns correct mafia and cityzen counts."""
-        state_c = AgentStateInit(role=Role.CITIZEN, persona_id=1)
-        state_m = AgentStateInit(role=Role.MAFIA, persona_id=2)
-        await db.init_agent(state=state_c)
-        await db.init_agent(state=state_c)
-        await db.init_agent(state=state_m)
-
-        counts = await db.get_agents_count(status=AgentStatus.ALIVE)
-        assert counts.mafia == 1, f'unexpected mafia count: {counts.mafia}'
-        assert counts.citizen == 2, f'unexpected citizen count: {counts.citizen}'
-
-    async def test_get_agents_count_no_agents(self, db: Database, game) -> None:
-        """Test when no agents match the status, counts should be zero (no None)."""
-        counts = await db.get_agents_count(status=AgentStatus.ELIMINATED)
-        assert counts.mafia == 0, f'expected 0 mafia, got: {counts.mafia}'
-        assert counts.citizen == 0, f'expected 0 citizen, got: {counts.citizen}'
-
     @pytest.mark.parametrize(
         'summary_type',
         [
@@ -327,7 +202,7 @@ class TestDatabaseAgent:
     ) -> None:
         """Parametrized: update_agent_summary updates the correct column."""
         agent_id = await db.init_agent(
-            state=AgentStateInit(role=Role.CITIZEN, persona_id=1)
+            state=AgentStateInit(id=5, role=Role.CITIZEN, persona_id=2)
         )
 
         value = f'updated-{summary_type.value}'
@@ -355,26 +230,27 @@ class TestDatabaseMessage:
     async def test_insert_message_and_get_history(self, db: Database, game) -> None:
         """Test inserting a message and retrieving it from history."""
         state = AgentStateInit(
+            id=5,
             role=Role.CITIZEN,
-            persona_id=1,
+            persona_id=2,
         )
         msg = Message(
-            agent_id=1,
+            agent_id=5,
             content='hello world',
             phase=GamePhase.NIGHT,
             round=1,
         )
 
         agent_id = await db.init_agent(state=state)
-        assert agent_id == 1, 'wrong agent id'
+        assert agent_id == 5, 'wrong agent id'
         msg_id = await db.insert_message(msg)
         assert msg_id == 1, 'wrong message id'
 
-        history = await db.get_message_hystory(agent_id=1)
+        history = await db.get_message_hystory(agent_id=5)
         assert isinstance(history, list), 'wrong result type'
         assert len(history) == 1, 'wrong history length'
         retrieved = history[0]
-        assert retrieved.agent_id == 1, 'wrong sender id'
+        assert retrieved.agent_id == 5, 'wrong sender id'
         assert retrieved.content == 'hello world', 'wrong content'
         assert retrieved.phase == GamePhase.NIGHT, 'wrong phase'
         assert retrieved.round == 1, 'wrong round'
@@ -388,8 +264,8 @@ class TestDatabaseMessage:
         """
         Test get_agents_state returns agents with aggregated message histories.
         """
-        state1 = AgentStateInit(role=Role.CITIZEN, persona_id=1)
-        state2 = AgentStateInit(role=Role.MAFIA, persona_id=2)
+        state1 = AgentStateInit(id=5, role=Role.CITIZEN, persona_id=2)
+        state2 = AgentStateInit(id=2, role=Role.MAFIA, persona_id=2)
         agent1 = await db.init_agent(state=state1)
         agent2 = await db.init_agent(state=state2)
         await db.insert_message(
@@ -423,8 +299,8 @@ class TestDatabaseMessage:
         """
         Test get_agents_state with no messages.
         """
-        state1 = AgentStateInit(role=Role.CITIZEN, persona_id=1)
-        state2 = AgentStateInit(role=Role.MAFIA, persona_id=2)
+        state1 = AgentStateInit(id=5, role=Role.CITIZEN, persona_id=2)
+        state2 = AgentStateInit(id=2, role=Role.MAFIA, persona_id=2)
         agent1 = await db.init_agent(state=state1)
         agent2 = await db.init_agent(state=state2)
         await db.insert_message(
@@ -439,3 +315,31 @@ class TestDatabaseMessage:
 
         assert len(a1.message_history) == 1, 'agent1 should have 1 message'
         assert len(a2.message_history) == 0, 'agent2 should have 0 messages'
+
+
+class TestDatabaseClear:
+    """Test Database.clear method"""
+
+    async def test_clear_removes_rows_and_resets_sequence(
+        self,
+        db: Database,
+        game,
+    ) -> None:
+        """Test clear() deletes temporal data and resets AUTOINCREMENT."""
+        await db.update_game_round(round=3)
+        state = AgentStateInit(id=5, role=Role.CITIZEN, persona_id=2)
+        agent_id = await db.init_agent(state=state)
+
+        # ensure data exists
+        game_state = await db.get_game_state()
+        assert agent_id in game_state.alive, 'expected alive'
+        assert game_state.round == 3, 'wrong game round'
+
+        # clear DB
+        await db.clear()
+
+        # no agents after clear
+        await db.init_game()
+        game_state = await db.get_game_state()
+        assert agent_id not in game_state.alive, 'unexpected alive'
+        assert game_state.round == 1, 'wrong game round'

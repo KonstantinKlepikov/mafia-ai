@@ -12,9 +12,5 @@ class RootException(Exception):
         return self.msg
 
 
-class EmptySharingException(RootException):
-    """Empty sharing error"""
-
-
 class VotingError(RootException):
     """Voting error"""

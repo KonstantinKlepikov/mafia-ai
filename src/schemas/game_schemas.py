@@ -69,8 +69,8 @@ class AgentSummary(BaseModel):
     answers: str = Field('', description='Agent answers summarisations')
 
 
-class AgentStateInit(BaseModel):
-    """Agent state for initialisation.
+class AgentStateBase(BaseModel):
+    """Agent state base.
 
     Attrs:
         role (Role): Game role of agent
@@ -84,7 +84,21 @@ class AgentStateInit(BaseModel):
     persona_id: int
 
 
-class AgentState(AgentStateInit):
+class AgentStateInit(AgentStateBase):
+    """Agent state for initialisation.
+
+    Attrs:
+        id: agent id
+        role (Role): Game role of agent
+        status (AgentStatus): game status of agent. Default to AgentStatus.ALIVE.
+        persona_id (int): persona id (assigned at game start)
+
+    """
+
+    id: int
+
+
+class AgentState(AgentStateBase):
     """Local agent state maintained inside the agent service.
 
     Attes:
@@ -92,7 +106,9 @@ class AgentState(AgentStateInit):
         message_history (list[Message]): stores received and sent messages
             for the current game.
 
+
     TODO: message_hystory -> summary (AgentSummary)
+    TODO: agent_id -> id
 
     """
 
@@ -113,19 +129,6 @@ class AgentSchema(BaseModel):
     persona: 'Persona'
 
 
-class AgentCount(BaseModel):
-    """Count of mafia nd citizen
-
-    Attrs:
-        mafia (int): Mafia count
-        citizen (int): Citizen count
-
-    """
-
-    mafia: int
-    citizen: int
-
-
 class HostQuestion(BaseModel):
     """A question sent by the human host to a specific agent."""
 
@@ -143,12 +146,20 @@ class AgentAnswer(BaseModel):
 
 
 class Persona(BaseModel):
-    """Persona document retrieved."""
+    """Persona document retrieved.
 
-    persona_id: int = Field(..., description='Numeric persona id stored in DB')
-    name: str = Field(..., description='Persona display name')
-    persona_type: str = Field(..., description='Character archetype')
-    prompt: str = Field(..., description='System prompt text for the LLM')
+    Attrs:
+        persona_id (int): persona id stored in DB
+        name (str): Persona display name
+        type (str): Character archetype
+        prompt (str): Persona description
+
+    """
+
+    persona_id: int
+    name: str
+    persona_type: str
+    prompt: str
 
 
 class HostDecision(BaseModel):
@@ -187,6 +198,10 @@ class LLMRequest(BaseModel):
 
     Attrs:
 
+        system_prompt (str): System prompt for agent.
+        persona_name (str): Persona name.
+        role (Role): Game role of agent.
+        persona_character (str): Character archetype
         persona_prompt (str): Persona system prompt
         phase_prompt (str): Curent phase system prompt
         summary (str): Summarized conversation history for this pgase
@@ -195,6 +210,10 @@ class LLMRequest(BaseModel):
 
     """
 
+    system_prompt: str
+    persona_name: str
+    role: Role
+    persona_character: str
     persona_prompt: str
     phase_prompt: str
     summary: str
@@ -208,14 +227,16 @@ class LLMRequest(BaseModel):
 
         """
         txt = (
+            f'You name is: {self.persona_name}.\n'
+            f'You role in game is: {self.role.value}.\n'
+            f'You character is: {self.persona_character}.\n'
             f'{self.persona_prompt}\n'
             f'{self.phase_prompt}\n'
-            f'Твои воспоминания о предыдущих событиях: {self.summary}\n'
+            f'Your recollections of past events and conversations.: {self.summary}.\n'
         )
         if self.messages:
-            txt = (
-                txt + 'Несколько запомнивщихся сообщений, сделанных другими игроками:\n'
-            )
+            txt = txt + 'A recent conversation:\n'
             for message in self.messages:
-                txt = txt + f'{message.agent_name} сказал: {message.content}\n'
+                txt = txt + f'{message.agent_name}: {message.content}\n'
+        txt = txt + self.system_prompt
         return txt

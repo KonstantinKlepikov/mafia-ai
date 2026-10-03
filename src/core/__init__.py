@@ -1,7 +1,7 @@
 from .agent import AgentLogic
 from .crud import Database
 from .event_bus import EventBus
-from .game import Game, Shared
+from .game import Game
 from .logging import setup_logging
 
 
@@ -10,6 +10,5 @@ __all__ = [
     'Database',
     'EventBus',
     'Game',
-    'Shared',
     'setup_logging',
 ]

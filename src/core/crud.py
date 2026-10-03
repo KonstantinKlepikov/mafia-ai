@@ -1,18 +1,10 @@
 import asyncio
 import json
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import AsyncGenerator
 
-import aiofiles
 import aiosqlite
-import yaml
-from aiofiles import os as aos
-from async_lru import alru_cache
 from loguru import logger
 
 from schemas import (
-    AgentCount,
     AgentState,
     AgentStateInit,
     AgentStatus,
@@ -21,11 +13,10 @@ from schemas import (
     GameState,
     Message,
     MessageItem,
-    Persona,
     Role,
     SummaryType,
-    SystemPromptKey,
 )
+from schemas.constants import ALL, CITIZEN_IDS, MAFIA_IDS
 
 
 class Database:
@@ -50,12 +41,6 @@ class Database:
     def __init__(self, db_path: str = ':memory:') -> None:
         self._db_path = db_path
         self._conn: aiosqlite.Connection | None = None
-
-    @asynccontextmanager
-    async def mconn(self) -> AsyncGenerator[aiosqlite.Connection, None]:
-        """Db connection contexted"""
-        yield self.conn
-        await self.close()
 
     @property
     def conn(self) -> aiosqlite.Connection:
@@ -93,17 +78,6 @@ class Database:
         """
         await conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS personas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                type TEXT NOT NULL,
-                prompt TEXT NOT NULL
-            )
-            """
-        )
-
-        await conn.execute(
-            """
             CREATE TABLE IF NOT EXISTS game_state (
                 round INTEGER NOT NULL DEFAULT 1,
                 phase TEXT NOT NULL DEFAULT 'NIGHT'
@@ -114,11 +88,10 @@ class Database:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS agent_states (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 persona_id INTEGER NOT NULL,
                 role TEXT NOT NULL,
-                status TEXT NOT NULL,
-                FOREIGN KEY(persona_id) REFERENCES personas(id)
+                status TEXT NOT NULL
             )
             """
         )
@@ -159,172 +132,16 @@ class Database:
             """
         )
 
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS system_prompts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT NOT NULL,
-                text TEXT NOT NULL
-            )
-            """
-        )
-
-        await conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_system_prompts_key
-            ON system_prompts(key)
-            """
-        )
-
         await conn.commit()
 
-    async def init_from_yaml(self, yaml_path: Path) -> list[int]:
-        """Load personas from YAML config into database. System is olways first.
-
-        Args:
-            yaml_path (Path): Path to prompts.yaml config file.
-
-        Raises:
-            FileNotFoundError: If yaml_path does not exist.
-
-        Returns:
-            list[int]: list of personas ids
-
-        """
-        if not await aos.path.exists(yaml_path):
-            raise FileNotFoundError(f'Config file not found: {yaml_path}')
-
-        async with aiofiles.open(yaml_path, 'r', encoding='utf-8') as f:
-            content = await f.read()
-
-        config = await asyncio.to_thread(yaml.safe_load, content)
-
-        inserted_ids: list[int] = []
-
-        for persona_data in config.get('personas', []):
-            cursor = await self.conn.execute(
-                """
-                INSERT INTO personas (name, type, prompt)
-                VALUES (?, ?, ?)
-                """,
-                (
-                    persona_data['name'],
-                    persona_data['type'],
-                    persona_data['prompt'],
-                ),
-            )
-            inserted_ids.append(cursor.lastrowid)  # type: ignore[arg-type]
-
-        # insert system prompts (game prompts) into system_prompts table
-        game_prompts = config.get('game_prompts', {}) or {}
-        for k, v in game_prompts.items():
-            await self.conn.execute(
-                """
-                INSERT INTO system_prompts (key, text)
-                VALUES (?, ?)
-                """,
-                (k, v),
-            )
-
-        await self.conn.commit()
-        logger.info(
-            f'Loaded {len(inserted_ids)} personas and {len(game_prompts)} '
-            f' system prompts from {yaml_path}'
-        )
-
-        return inserted_ids
-
-    @alru_cache
-    async def get_system_prompt(self, key: SystemPromptKey) -> str:
-        """Retrieve system prompt text by key.
-
-        Args:
-            key (SystemPromptKey): key of system prompt
-
-        Raises:
-            ValueError: prompt with given key is not found.
-
-        """
-        cursor = await self.conn.execute(
-            'SELECT text FROM system_prompts WHERE key = ?',
-            (key.value,),
-        )
-        row = await cursor.fetchone()
-
-        if row is None:
-            raise ValueError(f'System prompt not found: {key.value}')
-
-        return row['text']
-
-    @alru_cache
-    async def get_persona(self, persona_id: int) -> Persona:
-        """Retrieve a persona by ID.
-
-        Args:
-            persona_id (int): persona identifier.
-
-        Raises:
-            ValueError: If persona not found.
-
-        Returns:
-            Persona
-
-        """
-
-        cursor = await self.conn.execute(
-            'SELECT id, name, type, prompt FROM personas WHERE id = ?',
-            (persona_id,),
-        )
-        row = await cursor.fetchone()
-
-        if row is None:
-            raise ValueError(f'Persona not found: {persona_id}')
-
-        return Persona(
-            persona_id=row['id'],
-            name=row['name'],
-            persona_type=row['type'],
-            prompt=row['prompt'],
-        )
-
-    @alru_cache
-    async def get_personas(self) -> list[Persona]:
-        """Return all personas in database.
-
-        Returns:
-            list[Persona]: List of Persona objects.
-
-        """
-
-        cursor = await self.conn.execute(
-            'SELECT id, name, type, prompt FROM personas ORDER BY id'
-        )
-        rows = await cursor.fetchall()
-
-        return [
-            Persona(
-                persona_id=row['id'],
-                name=row['name'],
-                persona_type=row['type'],
-                prompt=row['prompt'],
-            )
-            for row in rows
-        ]
-
     async def clear(self) -> None:
-        """Delete all temporal game data
-
-        TODO: test me
-
-        """
+        """Delete all temporal game data"""
         await self.conn.execute('PRAGMA foreign_keys = OFF')
         await self.conn.commit()
         cursor = await self.conn.execute(
             """SELECT name FROM sqlite_master
             WHERE type='table'
             AND name NOT LIKE 'sqlite_%'
-            AND name <> 'personas'
-            AND name <> 'system_prompts'
             """
         )
         rows = await cursor.fetchall()
@@ -363,6 +180,7 @@ class Database:
 
     async def init_game(self) -> None:
         """Insert new started game with round 1 and phase NIGHT."""
+        await self.clear()
         await self.conn.execute(
             """
             INSERT INTO game_state
@@ -428,47 +246,47 @@ class Database:
         )
         await self.conn.commit()
 
-    async def get_game_state(self) -> GameState:
-        """Get game state by ID.
+    async def get_alive_agents(self) -> list[int]:
+        """Get alive agents
 
         Returns:
-            GameState.
+            list[int]: ids.
+
+        TODO: test me
 
         """
         cursor = await self.conn.execute(
             """
-            SELECT
-                gs.round as round,
-                gs.phase as phase,
-                group_concat(
-                    CASE WHEN st.status = 'ALIVE' THEN st.id END, ','
-                ) as alive,
-                group_concat(
-                    CASE WHEN st.status = 'ELIMINATED' THEN st.id END, ','
-                ) as eliminated,
-                group_concat(
-                    CASE WHEN st.role = 'MAFIA'
-                    AND st.status = 'ALIVE'
-                    THEN st.id END, ','
-                ) as mafia,
-                group_concat(
-                    CASE WHEN st.role = 'CITIZEN'
-                    AND st.status = 'ALIVE'
-                    THEN st.id END, ','
-                ) as citizen
-            FROM game_state gs
-            LEFT JOIN agent_states st ON st.role <> 'SYSTEM'
-             """
+            SELECT id
+            FROM agent_states
+            WHERE role <> 'SYSTEM' AND status = 'ALIVE'
+            ORDER BY id
+            """
+        )
+        rows = await cursor.fetchall()
+        return [int(r['id']) for r in rows]
+
+    async def get_game_state(self) -> GameState:
+        """Get game state.
+
+        Returns:
+            GameState.
+
+        TODO: test me
+
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT round, phase
+            FROM game_state
+            """
         )
         row = await cursor.fetchone()
 
-        # parse strings produced by group_concat
-        alive = [int(x) for x in row['alive'].split(',')] if row['alive'] else []
-        eliminated = (
-            [int(x) for x in row['eliminated'].split(',')] if row['eliminated'] else []
-        )
-        mafia = [int(x) for x in row['mafia'].split(',')] if row['mafia'] else []
-        citizen = [int(x) for x in row['citizen'].split(',')] if row['citizen'] else []
+        alive = await self.get_alive_agents()
+        eliminated = [i for i in ALL if i not in alive]
+        mafia = [i for i in MAFIA_IDS if i in alive]
+        citizen = [i for i in CITIZEN_IDS if i in alive]
 
         return GameState(
             round=row['round'],
@@ -486,15 +304,16 @@ class Database:
             state (AgentStateInit): AgentState to persist.
 
         Returns:
-            int: agent ID.
+            int: agent id.
 
         """
         cursor = await self.conn.execute(
             """
-            INSERT INTO agent_states (role, status, persona_id)
-            VALUES (?, ?, ?)
+            INSERT INTO agent_states (id, role, status, persona_id)
+            VALUES (?, ?, ?, ?)
             """,
             (
+                state.id,
                 state.role.value,
                 state.status.value,
                 state.persona_id,
@@ -753,84 +572,6 @@ class Database:
             )
 
         return agents
-
-    async def get_agents_ids(self, status: AgentStatus) -> list[int]:
-        """Get ids for agents in a game.
-
-        Args:
-            status (AgentStatus): agent status for filtering.
-
-        Returns:
-            list[int]: ids of agents.
-
-        """
-        cursor = await self.conn.execute(
-            """
-            SELECT id
-            FROM agent_states
-            WHERE status = ? AND role <> 'SYSTEM'
-            ORDER BY id
-            """,
-            (status.value,),
-        )
-
-        rows = await cursor.fetchall()
-        return [row['id'] for row in rows]
-
-    async def get_mafia_ids(self, status: AgentStatus) -> list[int]:
-        """Get ids for mafia agents in a game.
-
-        Args:
-            status (AgentStatus): agent status for filtering.
-
-        Returns:
-            list[int]: ids of agents.
-
-        """
-        cursor = await self.conn.execute(
-            """
-            SELECT id
-            FROM agent_states
-            WHERE status = ? AND role = 'MAFIA'
-            ORDER BY id
-            """,
-            (status.value,),
-        )
-
-        rows = await cursor.fetchall()
-        return [row['id'] for row in rows]
-
-    async def get_agents_count(self, status: AgentStatus) -> AgentCount:
-        """Get citizen and mafia count.
-
-        Args:
-            status (AgentStatus): agent status for filtering.
-
-        Returns:
-            AgentCount.
-
-        """
-        cursor = await self.conn.execute(
-            """
-            SELECT
-                COALESCE(
-                    SUM(CASE WHEN role = 'MAFIA' THEN 1 ELSE 0 END), 0
-                ) AS mafia,
-                COALESCE(
-                    SUM(CASE WHEN role = 'CITIZEN' THEN 1 ELSE 0 END), 0
-                ) AS citizen
-            FROM agent_states
-            WHERE status = ?
-            """,
-            (status.value,),
-        )
-
-        row = await cursor.fetchone()
-
-        return AgentCount(
-            mafia=row['mafia'],  # type: ignore[index]
-            citizen=row['citizen'],  # type: ignore[index]
-        )
 
     async def get_agent_summary(self, agent_id: int) -> AgentSummary:
         """Get conversations summary of agent
